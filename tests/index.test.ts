@@ -9,7 +9,7 @@ describe("webgl2-graph", () => {
   it("should log on init", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     init();
-    expect(spy).toHaveBeenCalledWith("webgl2-graph v0.1.0 initialized");
+    expect(spy).toHaveBeenCalledWith("v0.1.0 initialized");
     spy.mockRestore();
   });
 });
