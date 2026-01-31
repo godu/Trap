@@ -32,8 +32,11 @@ jobs:
       - name: Check formatting
         run: npm run fmt:check
 
-      - name: Build
+      - name: Build library
         run: npm run build
+
+      - name: Build demo
+        run: npm run build:demo
 
       - name: Run tests
         run: npm test
