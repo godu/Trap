@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>webgl2-graph Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 12px 24px;
+      background: #141414;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header span { font-size: 13px; color: #888; }
+    .controls {
+      padding: 12px 24px;
+      background: #111;
+      border-bottom: 1px solid #2a2a2a;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .controls label { font-size: 13px; color: #aaa; }
+    .controls input[type="range"] { width: 120px; }
+    .controls button {
+      padding: 6px 14px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .controls button:hover { background: #1d4ed8; }
+    #info { font-size: 12px; color: #666; margin-left: auto; }
+    canvas {
+      flex: 1;
+      display: block;
+      width: 100%;
+      cursor: grab;
+    }
+    canvas:active { cursor: grabbing; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>webgl2-graph</h1>
+    <span>WebGL2 Graph Visualization Demo</span>
+  </header>
+  <div class="controls">
+    <label>Nodes: <input type="range" id="nodeCount" min="10" max="500" value="80" /></label>
+    <span id="nodeCountVal">80</span>
+    <label>Edges: <input type="range" id="edgeFactor" min="1" max="6" value="2" /></label>
+    <span id="edgeFactorVal">2x</span>
+    <button id="regenerate">Regenerate</button>
+    <button id="togglePhysics">Pause Physics</button>
+    <span id="info">FPS: --</span>
+  </div>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl2');
+
+    if (!gl) {
+      document.body.innerHTML = '<p style="padding:40px;font-size:18px;">WebGL2 is not supported in this browser.</p>';
+      throw new Error('WebGL2 not supported');
+    }
+
+    // --- Shader sources ---
+    const nodeVS = `#version 300 es
+      uniform vec2 u_resolution;
+      uniform float u_pointSize;
+      in vec2 a_position;
+      in vec3 a_color;
+      out vec3 v_color;
+      void main() {
+        vec2 clip = (a_position / u_resolution) * 2.0 - 1.0;
+        gl_Position = vec4(clip.x, -clip.y, 0, 1);
+        gl_PointSize = u_pointSize;
+        v_color = a_color;
+      }
+    `;
+    const nodeFS = `#version 300 es
+      precision mediump float;
+      in vec3 v_color;
+      out vec4 fragColor;
+      void main() {
+        vec2 c = gl_PointCoord - 0.5;
+        float d = length(c);
+        if (d > 0.5) discard;
+        float alpha = 1.0 - smoothstep(0.4, 0.5, d);
+        fragColor = vec4(v_color, alpha);
+      }
+    `;
+    const edgeVS = `#version 300 es
+      uniform vec2 u_resolution;
+      in vec2 a_position;
+      void main() {
+        vec2 clip = (a_position / u_resolution) * 2.0 - 1.0;
+        gl_Position = vec4(clip.x, -clip.y, 0, 1);
+      }
+    `;
+    const edgeFS = `#version 300 es
+      precision mediump float;
+      uniform vec4 u_color;
+      out vec4 fragColor;
+      void main() { fragColor = u_color; }
+    `;
+
+    // --- Compile & link ---
+    function createShader(type, src) {
+      const s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(s));
+        gl.deleteShader(s);
+        return null;
+      }
+      return s;
+    }
+    function createProgram(vs, fs) {
+      const p = gl.createProgram();
+      gl.attachShader(p, vs);
+      gl.attachShader(p, fs);
+      gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+        console.error(gl.getProgramInfoLog(p));
+        return null;
+      }
+      return p;
+    }
+
+    const nodeProg = createProgram(
+      createShader(gl.VERTEX_SHADER, nodeVS),
+      createShader(gl.FRAGMENT_SHADER, nodeFS)
+    );
+    const edgeProg = createProgram(
+      createShader(gl.VERTEX_SHADER, edgeVS),
+      createShader(gl.FRAGMENT_SHADER, edgeFS)
+    );
+
+    // --- Graph data ---
+    let nodes = [];
+    let edges = [];
+    let physicsRunning = true;
+
+    function generateGraph(nodeCount, edgeFactor) {
+      nodes = [];
+      edges = [];
+      const w = canvas.width, h = canvas.height;
+      for (let i = 0; i < nodeCount; i++) {
+        nodes.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          vx: 0, vy: 0,
+          r: 0.3 + Math.random() * 0.7,
+          g: 0.3 + Math.random() * 0.5,
+          b: 0.8 + Math.random() * 0.2,
+        });
+      }
+      const edgeCount = Math.floor(nodeCount * edgeFactor);
+      const added = new Set();
+      for (let i = 0; i < edgeCount; i++) {
+        let a, b;
+        do {
+          a = Math.floor(Math.random() * nodeCount);
+          b = Math.floor(Math.random() * nodeCount);
+        } while (a === b || added.has(`${Math.min(a,b)}-${Math.max(a,b)}`));
+        added.add(`${Math.min(a,b)}-${Math.max(a,b)}`);
+        edges.push([a, b]);
+      }
+    }
+
+    // --- Force-directed layout step ---
+    function layoutStep() {
+      if (!physicsRunning) return;
+      const repulsion = 3000;
+      const attraction = 0.005;
+      const damping = 0.85;
+      const centerPull = 0.001;
+      const cx = canvas.width / 2, cy = canvas.height / 2;
+
+      for (let i = 0; i < nodes.length; i++) {
+        let fx = 0, fy = 0;
+        // Repulsion
+        for (let j = 0; j < nodes.length; j++) {
+          if (i === j) continue;
+          let dx = nodes[i].x - nodes[j].x;
+          let dy = nodes[i].y - nodes[j].y;
+          let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          let f = repulsion / (dist * dist);
+          fx += (dx / dist) * f;
+          fy += (dy / dist) * f;
+        }
+        // Center pull
+        fx += (cx - nodes[i].x) * centerPull;
+        fy += (cy - nodes[i].y) * centerPull;
+        nodes[i].vx = (nodes[i].vx + fx) * damping;
+        nodes[i].vy = (nodes[i].vy + fy) * damping;
+      }
+      // Attraction along edges
+      for (const [a, b] of edges) {
+        let dx = nodes[b].x - nodes[a].x;
+        let dy = nodes[b].y - nodes[a].y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let f = dist * attraction;
+        let fx = (dx / dist) * f;
+        let fy = (dy / dist) * f;
+        nodes[a].vx += fx; nodes[a].vy += fy;
+        nodes[b].vx -= fx; nodes[b].vy -= fy;
+      }
+      for (const n of nodes) {
+        n.x += n.vx;
+        n.y += n.vy;
+      }
+    }
+
+    // --- Rendering ---
+    const nodePosBuf = gl.createBuffer();
+    const nodeColBuf = gl.createBuffer();
+    const edgeBuf = gl.createBuffer();
+
+    function render() {
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0.04, 0.04, 0.04, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+      const res = [canvas.width, canvas.height];
+
+      // Draw edges
+      const edgeVerts = new Float32Array(edges.length * 4);
+      for (let i = 0; i < edges.length; i++) {
+        const [a, b] = edges[i];
+        edgeVerts[i * 4] = nodes[a].x;
+        edgeVerts[i * 4 + 1] = nodes[a].y;
+        edgeVerts[i * 4 + 2] = nodes[b].x;
+        edgeVerts[i * 4 + 3] = nodes[b].y;
+      }
+      gl.useProgram(edgeProg);
+      gl.uniform2fv(gl.getUniformLocation(edgeProg, 'u_resolution'), res);
+      gl.uniform4fv(gl.getUniformLocation(edgeProg, 'u_color'), [0.25, 0.3, 0.4, 0.4]);
+      gl.bindBuffer(gl.ARRAY_BUFFER, edgeBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, edgeVerts, gl.DYNAMIC_DRAW);
+      const ePosLoc = gl.getAttribLocation(edgeProg, 'a_position');
+      gl.enableVertexAttribArray(ePosLoc);
+      gl.vertexAttribPointer(ePosLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.LINES, 0, edges.length * 2);
+
+      // Draw nodes
+      const posArr = new Float32Array(nodes.length * 2);
+      const colArr = new Float32Array(nodes.length * 3);
+      for (let i = 0; i < nodes.length; i++) {
+        posArr[i * 2] = nodes[i].x;
+        posArr[i * 2 + 1] = nodes[i].y;
+        colArr[i * 3] = nodes[i].r;
+        colArr[i * 3 + 1] = nodes[i].g;
+        colArr[i * 3 + 2] = nodes[i].b;
+      }
+      gl.useProgram(nodeProg);
+      gl.uniform2fv(gl.getUniformLocation(nodeProg, 'u_resolution'), res);
+      gl.uniform1f(gl.getUniformLocation(nodeProg, 'u_pointSize'), 8.0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, nodePosBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, posArr, gl.DYNAMIC_DRAW);
+      const nPosLoc = gl.getAttribLocation(nodeProg, 'a_position');
+      gl.enableVertexAttribArray(nPosLoc);
+      gl.vertexAttribPointer(nPosLoc, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, nodeColBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, colArr, gl.DYNAMIC_DRAW);
+      const nColLoc = gl.getAttribLocation(nodeProg, 'a_color');
+      gl.enableVertexAttribArray(nColLoc);
+      gl.vertexAttribPointer(nColLoc, 3, gl.FLOAT, false, 0, 0);
+      gl.drawArrays(gl.POINTS, 0, nodes.length);
+    }
+
+    // --- Resize ---
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = canvas.clientWidth * dpr;
+      canvas.height = canvas.clientHeight * dpr;
+    }
+    window.addEventListener('resize', resize);
+
+    // --- Controls ---
+    const nodeCountEl = document.getElementById('nodeCount');
+    const edgeFactorEl = document.getElementById('edgeFactor');
+    const nodeCountValEl = document.getElementById('nodeCountVal');
+    const edgeFactorValEl = document.getElementById('edgeFactorVal');
+    const infoEl = document.getElementById('info');
+
+    nodeCountEl.addEventListener('input', () => { nodeCountValEl.textContent = nodeCountEl.value; });
+    edgeFactorEl.addEventListener('input', () => { edgeFactorValEl.textContent = edgeFactorEl.value + 'x'; });
+    document.getElementById('regenerate').addEventListener('click', () => {
+      generateGraph(Number(nodeCountEl.value), Number(edgeFactorEl.value));
+    });
+    document.getElementById('togglePhysics').addEventListener('click', (e) => {
+      physicsRunning = !physicsRunning;
+      e.target.textContent = physicsRunning ? 'Pause Physics' : 'Resume Physics';
+    });
+
+    // --- Main loop ---
+    let lastTime = performance.now();
+    let frameCount = 0;
+    function loop(now) {
+      frameCount++;
+      if (now - lastTime >= 1000) {
+        infoEl.textContent = `FPS: ${frameCount} | Nodes: ${nodes.length} | Edges: ${edges.length}`;
+        frameCount = 0;
+        lastTime = now;
+      }
+      layoutStep();
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    resize();
+    generateGraph(80, 2);
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
