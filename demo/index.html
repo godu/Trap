@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <style>
       * {
         margin: 0;
@@ -13,36 +13,68 @@
       body {
         width: 100%;
         height: 100%;
+        height: 100dvh;
         overflow: hidden;
         background: #111;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        flex-shrink: 0;
+      }
+      .toggle-group {
+        display: flex;
+        gap: 2px;
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 6px;
+        padding: 2px;
+      }
+      .toggle-group button {
+        padding: 4px 12px;
+        background: none;
+        color: rgba(255, 255, 255, 0.5);
+        border: none;
+        border-radius: 4px;
+        font: 13px/1 system-ui, sans-serif;
+        cursor: pointer;
+      }
+      .toggle-group button[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.15);
+        color: #eee;
+      }
+      #fit-btn {
+        padding: 4px 12px;
+        background: rgba(255, 255, 255, 0.08);
+        color: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        font: 13px/1 system-ui, sans-serif;
+        cursor: pointer;
       }
       canvas {
         display: block;
+        flex: 1;
         width: 100%;
-        height: 100%;
+        min-height: 0;
       }
     </style>
   </head>
   <body>
+    <header>
+      <div class="toggle-group" id="dataset-toggle">
+        <button data-dataset="small" aria-pressed="true">Small</button>
+        <button data-dataset="medium" aria-pressed="false">Medium</button>
+        <button data-dataset="large" aria-pressed="false">Large</button>
+      </div>
+      <button id="fit-btn">Fit</button>
+    </header>
     <canvas id="canvas"></canvas>
-    <button
-      id="fit-btn"
-      style="
-        position: absolute;
-        top: 16px;
-        right: 16px;
-        padding: 6px 14px;
-        background: rgba(255, 255, 255, 0.12);
-        color: #eee;
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 6px;
-        font: 13px/1 system-ui, sans-serif;
-        cursor: pointer;
-        backdrop-filter: blur(4px);
-      "
-    >
-      Fit
-    </button>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

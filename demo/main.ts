@@ -1,6 +1,6 @@
 import { Renderer } from "../src/index";
 import type { Node } from "../src/index";
-import resources from "./small.minimal-resources.json";
+import smallResources from "./small.minimal-resources.json";
 
 interface Resource {
   InternalArn: string;
@@ -33,9 +33,16 @@ function toNodes(data: Resource[]): Node[] {
   });
 }
 
+const loaders: Record<string, () => Promise<Resource[]>> = {
+  small: () => Promise.resolve(smallResources as Resource[]),
+  medium: () =>
+    import("./medium.minimal-resources.json").then((m) => m.default as Resource[]),
+  large: () =>
+    import("./large.minimal-resources.json").then((m) => m.default as Resource[]),
+};
+
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-const nodes = toNodes(resources as Resource[]);
-const renderer = new Renderer({ canvas, nodes });
+const renderer = new Renderer({ canvas, nodes: toNodes(smallResources as Resource[]) });
 
 renderer.render();
 
@@ -45,4 +52,18 @@ window.addEventListener("resize", () => {
 
 document.getElementById("fit-btn")?.addEventListener("click", () => {
   renderer.fitToNodes();
+});
+
+document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-dataset]");
+  if (!btn) return;
+
+  const dataset = btn.dataset.dataset!;
+  for (const b of btn.parentElement!.querySelectorAll("button")) {
+    b.setAttribute("aria-pressed", String(b === btn));
+  }
+
+  loaders[dataset]().then((resources) => {
+    renderer.setNodes(toNodes(resources));
+  });
 });

@@ -59,6 +59,9 @@ export class Renderer {
   private nodeCount: number;
   private projectionLocation: WebGLUniformLocation;
   private nodes: Node[];
+  private posBuffer!: WebGLBuffer;
+  private colorBuffer!: WebGLBuffer;
+  private radiusBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
   private centerX = 0;
@@ -137,46 +140,70 @@ export class Renderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Instance data: position (x, y)
-    const positions = new Float32Array(nodes.length * 2);
-    for (let i = 0; i < nodes.length; i++) {
-      positions[i * 2] = nodes[i].x;
-      positions[i * 2 + 1] = nodes[i].y;
-    }
     const posBuffer = gl.createBuffer();
+    if (!posBuffer) throw new Error("Failed to create buffer");
+    this.posBuffer = posBuffer;
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(1);
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(1, 1);
 
     // Instance data: color (r, g, b)
+    const colorBuffer = gl.createBuffer();
+    if (!colorBuffer) throw new Error("Failed to create buffer");
+    this.colorBuffer = colorBuffer;
+    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+
+    // Instance data: radius
+    const radiusBuffer = gl.createBuffer();
+    if (!radiusBuffer) throw new Error("Failed to create buffer");
+    this.radiusBuffer = radiusBuffer;
+    gl.bindBuffer(gl.ARRAY_BUFFER, radiusBuffer);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+
+    gl.bindVertexArray(null);
+
+    this.uploadNodeData(gl, nodes);
+    return vao;
+  }
+
+  private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
+    const positions = new Float32Array(nodes.length * 2);
+    for (let i = 0; i < nodes.length; i++) {
+      positions[i * 2] = nodes[i].x;
+      positions[i * 2 + 1] = nodes[i].y;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
     const colors = new Float32Array(nodes.length * 3);
     for (let i = 0; i < nodes.length; i++) {
       colors[i * 3] = nodes[i].r;
       colors[i * 3 + 1] = nodes[i].g;
       colors[i * 3 + 2] = nodes[i].b;
     }
-    const colorBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
-    gl.vertexAttribDivisor(2, 1);
 
-    // Instance data: radius
     const radii = new Float32Array(nodes.length);
     for (let i = 0; i < nodes.length; i++) {
       radii[i] = nodes[i].radius;
     }
-    const radiusBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, radiusBuffer);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.radiusBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, radii, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
-    gl.vertexAttribDivisor(3, 1);
+  }
 
-    gl.bindVertexArray(null);
-    return vao;
+  setNodes(nodes: Node[]): void {
+    this.nodes = nodes;
+    this.nodeCount = nodes.length;
+    this.uploadNodeData(this.gl, nodes);
+    this.initCamera();
+    this.render();
   }
 
   private setupInteraction(): void {
