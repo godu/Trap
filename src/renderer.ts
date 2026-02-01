@@ -1,6 +1,6 @@
 import type { Node, RendererOptions } from "./types";
 import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
-import { computeBounds, computeFitView, createProjectionFromView } from "./camera";
+import { computeBounds, computeFitView } from "./camera";
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -85,6 +85,12 @@ export class Renderer {
   private animFrom = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
   private animTo = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
 
+  // Cached projection matrix (avoids allocation per frame)
+  private projectionMatrix = new Float32Array(16);
+
+  // Render throttling
+  private renderPending = false;
+
   // Interaction state
   private isDragging = false;
   private lastMouseX = 0;
@@ -125,6 +131,11 @@ export class Renderer {
     this.edgeNodeRadiusLocation = eRadLoc;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
+
+    // Set constant edge uniforms once
+    gl.useProgram(this.edgeProgram);
+    gl.uniform1f(this.edgeHeadLenLocation, 1.5);
+    gl.uniform1f(this.edgeNodeRadiusLocation, 2.0);
 
     if (options.edgeBuffer && options.edgeCount && options.edgeCount > 0) {
       this.edgeCount = options.edgeCount;
@@ -418,6 +429,16 @@ export class Renderer {
     }
   }
 
+  private requestRender(): void {
+    if (!this.renderPending) {
+      this.renderPending = true;
+      requestAnimationFrame(() => {
+        this.renderPending = false;
+        this.render();
+      });
+    }
+  }
+
   private zoomAt(screenX: number, screenY: number, factor: number): void {
     this.cancelAnimation();
     const world = this.screenToWorld(screenX, screenY);
@@ -425,7 +446,7 @@ export class Renderer {
     this.centerY = world.y + (this.centerY - world.y) * factor;
     this.halfW *= factor;
     this.halfH *= factor;
-    this.render();
+    this.requestRender();
   }
 
   private pan(screenDx: number, screenDy: number): void {
@@ -433,7 +454,7 @@ export class Renderer {
     const rect = this.canvas.getBoundingClientRect();
     this.centerX -= (screenDx / rect.width) * 2 * this.halfW;
     this.centerY += (screenDy / rect.height) * 2 * this.halfH;
-    this.render();
+    this.requestRender();
   }
 
   fitToNodes(duration = 300): void {
@@ -502,6 +523,21 @@ export class Renderer {
     }
   }
 
+  private updateProjection(): void {
+    const left = this.centerX - this.halfW;
+    const right = this.centerX + this.halfW;
+    const bottom = this.centerY - this.halfH;
+    const top = this.centerY + this.halfH;
+
+    const m = this.projectionMatrix;
+    m[0] = 2 / (right - left);
+    m[5] = 2 / (top - bottom);
+    m[10] = -1;
+    m[12] = -(right + left) / (right - left);
+    m[13] = -(top + bottom) / (top - bottom);
+    m[15] = 1;
+  }
+
   render(): void {
     const gl = this.gl;
 
@@ -511,19 +547,12 @@ export class Renderer {
     gl.clearColor(0.067, 0.067, 0.067, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    const projection = createProjectionFromView({
-      centerX: this.centerX,
-      centerY: this.centerY,
-      halfW: this.halfW,
-      halfH: this.halfH,
-    });
+    this.updateProjection();
 
     // Draw edges behind nodes
     if (this.edgeCount > 0) {
       gl.useProgram(this.edgeProgram);
-      gl.uniformMatrix4fv(this.edgeProjLocation, false, projection);
-      gl.uniform1f(this.edgeHeadLenLocation, 1.5);
-      gl.uniform1f(this.edgeNodeRadiusLocation, 2.0);
+      gl.uniformMatrix4fv(this.edgeProjLocation, false, this.projectionMatrix);
       gl.bindVertexArray(this.edgeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 9, this.edgeCount);
       gl.bindVertexArray(null);
@@ -531,7 +560,7 @@ export class Renderer {
 
     // Draw nodes on top
     gl.useProgram(this.program);
-    gl.uniformMatrix4fv(this.projectionLocation, false, projection);
+    gl.uniformMatrix4fv(this.projectionLocation, false, this.projectionMatrix);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
     gl.bindVertexArray(null);
