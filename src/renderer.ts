@@ -72,6 +72,7 @@ export class Renderer {
   private edgeOffsetLocation: WebGLUniformLocation;
   private edgeHeadLenLocation: WebGLUniformLocation;
   private edgeNodeRadiusLocation: WebGLUniformLocation;
+  private edgeViewportLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
@@ -118,7 +119,11 @@ export class Renderer {
     this.nodes = options.nodes;
     this.nodeCount = options.nodes.length;
 
-    const gl = this.canvas.getContext("webgl2", { antialias: true });
+    const gl = this.canvas.getContext("webgl2", {
+      antialias: false,
+      desynchronized: true,
+      powerPreference: "high-performance",
+    });
     if (!gl) throw new Error("WebGL2 not supported");
     this.gl = gl;
 
@@ -148,6 +153,10 @@ export class Renderer {
     const eRadLoc = gl.getUniformLocation(this.edgeProgram, "u_nodeRadius");
     if (!eRadLoc) throw new Error("u_nodeRadius not found");
     this.edgeNodeRadiusLocation = eRadLoc;
+
+    const eVpLoc = gl.getUniformLocation(this.edgeProgram, "u_viewport");
+    if (!eVpLoc) throw new Error("u_viewport not found");
+    this.edgeViewportLocation = eVpLoc;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
 
@@ -580,6 +589,13 @@ export class Renderer {
       gl.useProgram(this.edgeProgram);
       gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
       gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
+      gl.uniform4f(
+        this.edgeViewportLocation,
+        this.centerX - this.halfW,
+        this.centerY - this.halfH,
+        this.centerX + this.halfW,
+        this.centerY + this.halfH,
+      );
       gl.bindVertexArray(this.edgeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 9, this.edgeCount);
     }

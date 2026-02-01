@@ -49,10 +49,20 @@ uniform vec2 u_scale;
 uniform vec2 u_offset;
 uniform float u_headLength;
 uniform float u_nodeRadius;
+uniform vec4 u_viewport;
 
 out vec4 v_color;
 
 void main() {
+  // Viewport frustum cull — before expensive math
+  vec2 emin = min(a_source, a_target) - u_nodeRadius;
+  vec2 emax = max(a_source, a_target) + u_nodeRadius;
+  if (emax.x < u_viewport.x || emin.x > u_viewport.z ||
+      emax.y < u_viewport.y || emin.y > u_viewport.w) {
+    gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+    return;
+  }
+
   v_color = vec4(a_color.rgb * a_color.a, a_color.a);
 
   float tParam = a_template.x;
