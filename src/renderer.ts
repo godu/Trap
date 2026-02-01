@@ -60,9 +60,7 @@ export class Renderer {
   private scaleLocation: WebGLUniformLocation;
   private offsetLocation: WebGLUniformLocation;
   private nodes: Node[];
-  private posBuffer!: WebGLBuffer;
-  private colorBuffer!: WebGLBuffer;
-  private radiusBuffer!: WebGLBuffer;
+  private nodeInstanceBuffer!: WebGLBuffer;
 
   // Edge rendering
   private edgeProgram: WebGLProgram;
@@ -218,31 +216,27 @@ export class Renderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-    // Instance data: position (x, y)
-    const posBuffer = gl.createBuffer();
-    if (!posBuffer) throw new Error("Failed to create buffer");
-    this.posBuffer = posBuffer;
-    gl.bindBuffer(gl.ARRAY_BUFFER, posBuffer);
+    // Single interleaved instance buffer
+    // Per node: [x, y, r, g, b, radius] = 6 floats = 24 bytes
+    const NODE_STRIDE = 6 * 4;
+    const instanceBuf = gl.createBuffer();
+    if (!instanceBuf) throw new Error("Failed to create buffer");
+    this.nodeInstanceBuffer = instanceBuf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);
+
+    // a_position (vec2) at byte offset 0
     gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, NODE_STRIDE, 0);
     gl.vertexAttribDivisor(1, 1);
 
-    // Instance data: color (r, g, b)
-    const colorBuffer = gl.createBuffer();
-    if (!colorBuffer) throw new Error("Failed to create buffer");
-    this.colorBuffer = colorBuffer;
-    gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+    // a_color (vec3) at byte offset 8
     gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, NODE_STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
-    // Instance data: radius
-    const radiusBuffer = gl.createBuffer();
-    if (!radiusBuffer) throw new Error("Failed to create buffer");
-    this.radiusBuffer = radiusBuffer;
-    gl.bindBuffer(gl.ARRAY_BUFFER, radiusBuffer);
+    // a_radius (float) at byte offset 20
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, NODE_STRIDE, 20);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
@@ -252,29 +246,18 @@ export class Renderer {
   }
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
-    const positions = new Float32Array(nodes.length * 2);
+    const data = new Float32Array(nodes.length * 6);
     for (let i = 0; i < nodes.length; i++) {
-      positions[i * 2] = nodes[i].x;
-      positions[i * 2 + 1] = nodes[i].y;
+      const off = i * 6;
+      data[off] = nodes[i].x;
+      data[off + 1] = nodes[i].y;
+      data[off + 2] = nodes[i].r;
+      data[off + 3] = nodes[i].g;
+      data[off + 4] = nodes[i].b;
+      data[off + 5] = nodes[i].radius;
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.posBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
-
-    const colors = new Float32Array(nodes.length * 3);
-    for (let i = 0; i < nodes.length; i++) {
-      colors[i * 3] = nodes[i].r;
-      colors[i * 3 + 1] = nodes[i].g;
-      colors[i * 3 + 2] = nodes[i].b;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
-
-    const radii = new Float32Array(nodes.length);
-    for (let i = 0; i < nodes.length; i++) {
-      radii[i] = nodes[i].radius;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.radiusBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, radii, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
   }
 
   private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
@@ -315,8 +298,8 @@ export class Renderer {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Single interleaved instance buffer
-    // Per edge: [srcX, srcY, tgtX, tgtY, r, g, b, a] = 8 floats = 32 bytes
-    const STRIDE = 8 * 4;
+    // Per edge: [srcX(f32), srcY(f32), tgtX(f32), tgtY(f32), RGBA(4×u8)] = 20 bytes
+    const STRIDE = 20;
     const buf = gl.createBuffer();
     if (!buf) throw new Error("Failed to create buffer");
     this.edgeInstanceBuffer = buf;
@@ -332,16 +315,16 @@ export class Renderer {
     gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
-    // a_color (vec4) at byte offset 16
+    // a_color (vec4 normalized u8) at byte offset 16
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, 16);
+    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 16);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
     return vao;
   }
 
-  setEdges(buffer: Float32Array, count: number): void {
+  setEdges(buffer: ArrayBufferView, count: number): void {
     this.edgeCount = count;
     if (count > 0) {
       const gl = this.gl;

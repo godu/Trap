@@ -63,7 +63,7 @@ void main() {
     return;
   }
 
-  v_color = vec4(a_color.rgb * a_color.a, a_color.a);
+  v_color = a_color;
 
   float tParam = a_template.x;
   float perpOffset = a_template.y;

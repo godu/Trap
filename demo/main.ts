@@ -55,11 +55,15 @@ function buildPositionLookup(resources: Resource[]): Map<string, { x: number; y:
   return map;
 }
 
+const BYTES_PER_EDGE = 20; // 4 floats (16) + 4 uint8 (4)
+
 function toEdgeBuffer(
   edgeData: EdgeData[],
   lookup: Map<string, { x: number; y: number }>,
-): { buffer: Float32Array; count: number } {
-  const buffer = new Float32Array(edgeData.length * 8);
+): { buffer: Uint8Array; count: number } {
+  const arrayBuf = new ArrayBuffer(edgeData.length * BYTES_PER_EDGE);
+  const f32 = new Float32Array(arrayBuf);
+  const u8 = new Uint8Array(arrayBuf);
   let count = 0;
   for (let i = 0; i < edgeData.length; i++) {
     const e = edgeData[i];
@@ -67,18 +71,19 @@ function toEdgeBuffer(
     const tgt = lookup.get(e.ResourceArn);
     if (!src || !tgt) continue;
     const [r, g, b, a] = PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
-    const off = count * 8;
-    buffer[off] = src.x;
-    buffer[off + 1] = src.y;
-    buffer[off + 2] = tgt.x;
-    buffer[off + 3] = tgt.y;
-    buffer[off + 4] = r;
-    buffer[off + 5] = g;
-    buffer[off + 6] = b;
-    buffer[off + 7] = a;
+    const foff = count * 5; // 20 / 4 = 5 float-slots per edge
+    f32[foff] = src.x;
+    f32[foff + 1] = src.y;
+    f32[foff + 2] = tgt.x;
+    f32[foff + 3] = tgt.y;
+    const boff = count * BYTES_PER_EDGE + 16;
+    u8[boff] = (r * a * 255 + 0.5) | 0;
+    u8[boff + 1] = (g * a * 255 + 0.5) | 0;
+    u8[boff + 2] = (b * a * 255 + 0.5) | 0;
+    u8[boff + 3] = (a * 255 + 0.5) | 0;
     count++;
   }
-  return { buffer: buffer.subarray(0, count * 8), count };
+  return { buffer: new Uint8Array(arrayBuf, 0, count * BYTES_PER_EDGE), count };
 }
 
 const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
