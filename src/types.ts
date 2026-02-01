@@ -7,7 +7,19 @@ export interface Node {
   radius: number;
 }
 
+export interface Edge {
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
 export interface RendererOptions {
   canvas: HTMLCanvasElement;
   nodes: Node[];
+  edges?: Edge[];
 }

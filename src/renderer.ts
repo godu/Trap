@@ -1,5 +1,5 @@
-import type { Node, RendererOptions } from "./types";
-import { vertexSource, fragmentSource } from "./shaders";
+import type { Node, Edge, RendererOptions } from "./types";
+import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
 import { computeBounds, computeFitView, createProjectionFromView } from "./camera";
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -63,6 +63,17 @@ export class Renderer {
   private colorBuffer!: WebGLBuffer;
   private radiusBuffer!: WebGLBuffer;
 
+  // Edge rendering
+  private edgeProgram: WebGLProgram;
+  private edgeVao: WebGLVertexArrayObject;
+  private edgeCount = 0;
+  private edgeProjLocation: WebGLUniformLocation;
+  private edgeHeadLenLocation: WebGLUniformLocation;
+  private edgeNodeRadiusLocation: WebGLUniformLocation;
+  private edgeSourceBuffer!: WebGLBuffer;
+  private edgeTargetBuffer!: WebGLBuffer;
+  private edgeColorBuffer!: WebGLBuffer;
+
   // Camera state (world-space view)
   private centerX = 0;
   private centerY = 0;
@@ -99,6 +110,28 @@ export class Renderer {
     this.projectionLocation = loc;
 
     this.vao = this.setupGeometry(gl, options.nodes);
+
+    // Edge program
+    this.edgeProgram = createProgram(gl, edgeVertexSource, edgeFragmentSource);
+
+    const eProjLoc = gl.getUniformLocation(this.edgeProgram, "u_projection");
+    if (!eProjLoc) throw new Error("u_projection not found in edge program");
+    this.edgeProjLocation = eProjLoc;
+
+    const eHeadLoc = gl.getUniformLocation(this.edgeProgram, "u_headLength");
+    if (!eHeadLoc) throw new Error("u_headLength not found");
+    this.edgeHeadLenLocation = eHeadLoc;
+
+    const eRadLoc = gl.getUniformLocation(this.edgeProgram, "u_nodeRadius");
+    if (!eRadLoc) throw new Error("u_nodeRadius not found");
+    this.edgeNodeRadiusLocation = eRadLoc;
+
+    this.edgeVao = this.setupEdgeGeometry(gl);
+
+    if (options.edges && options.edges.length > 0) {
+      this.edgeCount = options.edges.length;
+      this.uploadEdgeData(gl, options.edges);
+    }
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -196,6 +229,97 @@ export class Renderer {
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.radiusBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, radii, gl.STATIC_DRAW);
+  }
+
+  private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
+    const vao = gl.createVertexArray();
+    if (!vao) throw new Error("Failed to create edge VAO");
+    gl.bindVertexArray(vao);
+
+    // Arrow template: shaft (2 triangles) + arrowhead (1 triangle) = 9 vertices
+    // Each vertex: (tParam, perpOffset, flag)
+    const SHAFT_HW = 0.2;
+    const HEAD_HW = 0.7;
+    // prettier-ignore
+    const template = new Float32Array([
+      // Shaft triangle 1
+      0, -SHAFT_HW, 0,   1, -SHAFT_HW, 0,   1,  SHAFT_HW, 0,
+      // Shaft triangle 2
+      0, -SHAFT_HW, 0,   1,  SHAFT_HW, 0,   0,  SHAFT_HW, 0,
+      // Head triangle
+      0, -HEAD_HW,  1,   0,  0,        2,   0,  HEAD_HW,  1,
+    ]);
+
+    const templateBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, templateBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, template, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+    // Instance: source position
+    const srcBuf = gl.createBuffer();
+    if (!srcBuf) throw new Error("Failed to create buffer");
+    this.edgeSourceBuffer = srcBuf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, srcBuf);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+
+    // Instance: target position
+    const tgtBuf = gl.createBuffer();
+    if (!tgtBuf) throw new Error("Failed to create buffer");
+    this.edgeTargetBuffer = tgtBuf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, tgtBuf);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+
+    // Instance: color (rgba)
+    const colBuf = gl.createBuffer();
+    if (!colBuf) throw new Error("Failed to create buffer");
+    this.edgeColorBuffer = colBuf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+
+    gl.bindVertexArray(null);
+    return vao;
+  }
+
+  private uploadEdgeData(gl: WebGL2RenderingContext, edges: Edge[]): void {
+    const n = edges.length;
+    const sources = new Float32Array(n * 2);
+    const targets = new Float32Array(n * 2);
+    const colors = new Float32Array(n * 4);
+
+    for (let i = 0; i < n; i++) {
+      sources[i * 2] = edges[i].sourceX;
+      sources[i * 2 + 1] = edges[i].sourceY;
+      targets[i * 2] = edges[i].targetX;
+      targets[i * 2 + 1] = edges[i].targetY;
+      colors[i * 4] = edges[i].r;
+      colors[i * 4 + 1] = edges[i].g;
+      colors[i * 4 + 2] = edges[i].b;
+      colors[i * 4 + 3] = edges[i].a;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeSourceBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, sources, gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeTargetBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, targets, gl.STATIC_DRAW);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+  }
+
+  setEdges(edges: Edge[]): void {
+    this.edgeCount = edges.length;
+    if (edges.length > 0) {
+      this.uploadEdgeData(this.gl, edges);
+    }
+    this.render();
   }
 
   setNodes(nodes: Node[]): void {
@@ -417,16 +541,27 @@ export class Renderer {
     gl.clearColor(0.067, 0.067, 0.067, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    gl.useProgram(this.program);
-
     const projection = createProjectionFromView({
       centerX: this.centerX,
       centerY: this.centerY,
       halfW: this.halfW,
       halfH: this.halfH,
     });
-    gl.uniformMatrix4fv(this.projectionLocation, false, projection);
 
+    // Draw edges behind nodes
+    if (this.edgeCount > 0) {
+      gl.useProgram(this.edgeProgram);
+      gl.uniformMatrix4fv(this.edgeProjLocation, false, projection);
+      gl.uniform1f(this.edgeHeadLenLocation, 1.5);
+      gl.uniform1f(this.edgeNodeRadiusLocation, 2.0);
+      gl.bindVertexArray(this.edgeVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 9, this.edgeCount);
+      gl.bindVertexArray(null);
+    }
+
+    // Draw nodes on top
+    gl.useProgram(this.program);
+    gl.uniformMatrix4fv(this.projectionLocation, false, projection);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
     gl.bindVertexArray(null);
