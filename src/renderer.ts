@@ -119,6 +119,9 @@ export class Renderer {
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
+      alpha: false,
+      depth: false,
+      stencil: false,
       desynchronized: true,
       powerPreference: "high-performance",
     });

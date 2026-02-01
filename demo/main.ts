@@ -40,6 +40,22 @@ const PRIVILEGE_COLORS: Record<string, [number, number, number, number]> = {
 const DEFAULT_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
 const DEFAULT_PRIV_COLOR: [number, number, number, number] = [0.5, 0.5, 0.5, 0.3];
 
+// Pre-compute premultiplied RGBA as packed uint32 (little-endian: R | G<<8 | B<<16 | A<<24)
+function packPremultiplied(r: number, g: number, b: number, a: number): number {
+  return (
+    ((r * a * 255 + 0.5) | 0) |
+    (((g * a * 255 + 0.5) | 0) << 8) |
+    (((b * a * 255 + 0.5) | 0) << 16) |
+    (((a * 255 + 0.5) | 0) << 24)
+  );
+}
+
+const PRIVILEGE_U32: Record<string, number> = {};
+for (const [key, [r, g, b, a]] of Object.entries(PRIVILEGE_COLORS)) {
+  PRIVILEGE_U32[key] = packPremultiplied(r, g, b, a);
+}
+const DEFAULT_PRIV_U32 = packPremultiplied(...DEFAULT_PRIV_COLOR);
+
 function toNodes(data: Resource[]): Node[] {
   return data.map((res) => {
     const [r, g, b] = TYPE_COLORS[res.InternalType] ?? DEFAULT_COLOR;
@@ -63,24 +79,19 @@ function toEdgeBuffer(
 ): { buffer: Uint8Array; count: number } {
   const arrayBuf = new ArrayBuffer(edgeData.length * BYTES_PER_EDGE);
   const f32 = new Float32Array(arrayBuf);
-  const u8 = new Uint8Array(arrayBuf);
+  const u32 = new Uint32Array(arrayBuf);
   let count = 0;
   for (let i = 0; i < edgeData.length; i++) {
     const e = edgeData[i];
     const src = lookup.get(e.PrincipalArn);
     const tgt = lookup.get(e.ResourceArn);
     if (!src || !tgt) continue;
-    const [r, g, b, a] = PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
-    const foff = count * 5; // 20 / 4 = 5 float-slots per edge
-    f32[foff] = src.x;
-    f32[foff + 1] = src.y;
-    f32[foff + 2] = tgt.x;
-    f32[foff + 3] = tgt.y;
-    const boff = count * BYTES_PER_EDGE + 16;
-    u8[boff] = (r * a * 255 + 0.5) | 0;
-    u8[boff + 1] = (g * a * 255 + 0.5) | 0;
-    u8[boff + 2] = (b * a * 255 + 0.5) | 0;
-    u8[boff + 3] = (a * 255 + 0.5) | 0;
+    const slot = count * 5; // 20 / 4 = 5 uint32-slots per edge
+    f32[slot] = src.x;
+    f32[slot + 1] = src.y;
+    f32[slot + 2] = tgt.x;
+    f32[slot + 3] = tgt.y;
+    u32[slot + 4] = PRIVILEGE_U32[e.HasPrivileges] ?? DEFAULT_PRIV_U32;
     count++;
   }
   return { buffer: new Uint8Array(arrayBuf, 0, count * BYTES_PER_EDGE), count };
@@ -114,10 +125,6 @@ loaders.small().then(([resources, edgeData]) => {
   const lookup = buildPositionLookup(resources);
   const { buffer, count } = toEdgeBuffer(edgeData, lookup);
   renderer.setEdges(buffer, count);
-});
-
-window.addEventListener("resize", () => {
-  renderer.render();
 });
 
 document.getElementById("fit-btn")?.addEventListener("click", () => {
