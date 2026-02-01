@@ -21,5 +21,6 @@ export interface Edge {
 export interface RendererOptions {
   canvas: HTMLCanvasElement;
   nodes: Node[];
-  edges?: Edge[];
+  edgeBuffer?: Float32Array;
+  edgeCount?: number;
 }

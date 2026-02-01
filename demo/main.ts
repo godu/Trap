@@ -1,5 +1,5 @@
 import { Renderer } from "../src/index";
-import type { Node, Edge } from "../src/index";
+import type { Node } from "../src/index";
 import smallResources from "./small.minimal-resources.json";
 
 interface Resource {
@@ -55,20 +55,30 @@ function buildPositionLookup(resources: Resource[]): Map<string, { x: number; y:
   return map;
 }
 
-function toEdges(
+function toEdgeBuffer(
   edgeData: EdgeData[],
   lookup: Map<string, { x: number; y: number }>,
-): Edge[] {
-  const edges: Edge[] = [];
+): { buffer: Float32Array; count: number } {
+  const buffer = new Float32Array(edgeData.length * 8);
+  let count = 0;
   for (let i = 0; i < edgeData.length; i++) {
     const e = edgeData[i];
     const src = lookup.get(e.PrincipalArn);
     const tgt = lookup.get(e.ResourceArn);
     if (!src || !tgt) continue;
     const [r, g, b, a] = PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
-    edges.push({ sourceX: src.x, sourceY: src.y, targetX: tgt.x, targetY: tgt.y, r, g, b, a });
+    const off = count * 8;
+    buffer[off] = src.x;
+    buffer[off + 1] = src.y;
+    buffer[off + 2] = tgt.x;
+    buffer[off + 3] = tgt.y;
+    buffer[off + 4] = r;
+    buffer[off + 5] = g;
+    buffer[off + 6] = b;
+    buffer[off + 7] = a;
+    count++;
   }
-  return edges;
+  return { buffer: buffer.subarray(0, count * 8), count };
 }
 
 const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
@@ -97,7 +107,8 @@ renderer.render();
 // Load edges for initial small dataset
 loaders.small().then(([resources, edgeData]) => {
   const lookup = buildPositionLookup(resources);
-  renderer.setEdges(toEdges(edgeData, lookup));
+  const { buffer, count } = toEdgeBuffer(edgeData, lookup);
+  renderer.setEdges(buffer, count);
 });
 
 window.addEventListener("resize", () => {
@@ -120,6 +131,7 @@ document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
   loaders[dataset]().then(([resources, edgeData]) => {
     const lookup = buildPositionLookup(resources);
     renderer.setNodes(toNodes(resources));
-    renderer.setEdges(toEdges(edgeData, lookup));
+    const { buffer, count } = toEdgeBuffer(edgeData, lookup);
+    renderer.setEdges(buffer, count);
   });
 });

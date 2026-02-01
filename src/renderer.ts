@@ -1,4 +1,4 @@
-import type { Node, Edge, RendererOptions } from "./types";
+import type { Node, RendererOptions } from "./types";
 import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
 import { computeBounds, computeFitView, createProjectionFromView } from "./camera";
 
@@ -70,9 +70,7 @@ export class Renderer {
   private edgeProjLocation: WebGLUniformLocation;
   private edgeHeadLenLocation: WebGLUniformLocation;
   private edgeNodeRadiusLocation: WebGLUniformLocation;
-  private edgeSourceBuffer!: WebGLBuffer;
-  private edgeTargetBuffer!: WebGLBuffer;
-  private edgeColorBuffer!: WebGLBuffer;
+  private edgeInstanceBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
   private centerX = 0;
@@ -128,9 +126,10 @@ export class Renderer {
 
     this.edgeVao = this.setupEdgeGeometry(gl);
 
-    if (options.edges && options.edges.length > 0) {
-      this.edgeCount = options.edges.length;
-      this.uploadEdgeData(gl, options.edges);
+    if (options.edgeBuffer && options.edgeCount && options.edgeCount > 0) {
+      this.edgeCount = options.edgeCount;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, options.edgeBuffer, gl.STATIC_DRAW);
     }
 
     gl.enable(gl.BLEND);
@@ -256,68 +255,39 @@ export class Renderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
-    // Instance: source position
-    const srcBuf = gl.createBuffer();
-    if (!srcBuf) throw new Error("Failed to create buffer");
-    this.edgeSourceBuffer = srcBuf;
-    gl.bindBuffer(gl.ARRAY_BUFFER, srcBuf);
+    // Single interleaved instance buffer
+    // Per edge: [srcX, srcY, tgtX, tgtY, r, g, b, a] = 8 floats = 32 bytes
+    const STRIDE = 8 * 4;
+    const buf = gl.createBuffer();
+    if (!buf) throw new Error("Failed to create buffer");
+    this.edgeInstanceBuffer = buf;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+
+    // a_source (vec2) at byte offset 0
     gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, STRIDE, 0);
     gl.vertexAttribDivisor(1, 1);
 
-    // Instance: target position
-    const tgtBuf = gl.createBuffer();
-    if (!tgtBuf) throw new Error("Failed to create buffer");
-    this.edgeTargetBuffer = tgtBuf;
-    gl.bindBuffer(gl.ARRAY_BUFFER, tgtBuf);
+    // a_target (vec2) at byte offset 8
     gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
-    // Instance: color (rgba)
-    const colBuf = gl.createBuffer();
-    if (!colBuf) throw new Error("Failed to create buffer");
-    this.edgeColorBuffer = colBuf;
-    gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+    // a_color (vec4) at byte offset 16
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(3, 4, gl.FLOAT, false, STRIDE, 16);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
     return vao;
   }
 
-  private uploadEdgeData(gl: WebGL2RenderingContext, edges: Edge[]): void {
-    const n = edges.length;
-    const sources = new Float32Array(n * 2);
-    const targets = new Float32Array(n * 2);
-    const colors = new Float32Array(n * 4);
-
-    for (let i = 0; i < n; i++) {
-      sources[i * 2] = edges[i].sourceX;
-      sources[i * 2 + 1] = edges[i].sourceY;
-      targets[i * 2] = edges[i].targetX;
-      targets[i * 2 + 1] = edges[i].targetY;
-      colors[i * 4] = edges[i].r;
-      colors[i * 4 + 1] = edges[i].g;
-      colors[i * 4 + 2] = edges[i].b;
-      colors[i * 4 + 3] = edges[i].a;
-    }
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeSourceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, sources, gl.STATIC_DRAW);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeTargetBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, targets, gl.STATIC_DRAW);
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeColorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
-  }
-
-  setEdges(edges: Edge[]): void {
-    this.edgeCount = edges.length;
-    if (edges.length > 0) {
-      this.uploadEdgeData(this.gl, edges);
+  setEdges(buffer: Float32Array, count: number): void {
+    this.edgeCount = count;
+    if (count > 0) {
+      const gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
     }
     this.render();
   }
