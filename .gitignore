@@ -4,3 +4,5 @@ demo-dist/
 coverage/
 *.tsbuildinfo
 .eslintcache
+
+.claude/settings.local.json

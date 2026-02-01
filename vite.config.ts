@@ -7,5 +7,11 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, "demo-dist"),
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "demo/index.html"),
+        escalation: resolve(__dirname, "demo/escalation.html"),
+      },
+    },
   },
 });
