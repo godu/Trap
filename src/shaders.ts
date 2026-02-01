@@ -29,7 +29,7 @@ void main() {
   float dist = length(v_uv);
   if (dist > 1.0) discard;
   float alpha = 1.0 - smoothstep(0.9, 1.0, dist);
-  outColor = vec4(v_color, alpha);
+  outColor = vec4(v_color * alpha, alpha);
 }
 `;
 
@@ -102,6 +102,6 @@ in vec4 v_color;
 out vec4 outColor;
 
 void main() {
-  outColor = v_color;
+  outColor = vec4(v_color.rgb * v_color.a, v_color.a);
 }
 `;

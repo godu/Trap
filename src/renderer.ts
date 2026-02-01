@@ -91,6 +91,16 @@ export class Renderer {
   // Render throttling
   private renderPending = false;
 
+  // Resize tracking
+  private resizeDirty = true;
+  private resizeObserver: ResizeObserver;
+
+  // Cached layout values
+  private cachedRect: DOMRect | null = null;
+
+  // Reusable world-coordinate result (avoids allocation per event)
+  private worldResult = { x: 0, y: 0 };
+
   // Interaction state
   private isDragging = false;
   private lastMouseX = 0;
@@ -144,7 +154,13 @@ export class Renderer {
     }
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.resizeDirty = true;
+      this.cachedRect = null;
+    });
+    this.resizeObserver.observe(this.canvas);
 
     this.resize();
     this.initCamera();
@@ -412,14 +428,20 @@ export class Renderer {
     );
   }
 
+  private getRect(): DOMRect {
+    if (!this.cachedRect) {
+      this.cachedRect = this.canvas.getBoundingClientRect();
+    }
+    return this.cachedRect;
+  }
+
   private screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.getRect();
     const nx = (screenX - rect.left) / rect.width;
     const ny = (screenY - rect.top) / rect.height;
-    return {
-      x: this.centerX + (nx - 0.5) * 2 * this.halfW,
-      y: this.centerY - (ny - 0.5) * 2 * this.halfH,
-    };
+    this.worldResult.x = this.centerX + (nx - 0.5) * 2 * this.halfW;
+    this.worldResult.y = this.centerY - (ny - 0.5) * 2 * this.halfH;
+    return this.worldResult;
   }
 
   private cancelAnimation(): void {
@@ -451,7 +473,7 @@ export class Renderer {
 
   private pan(screenDx: number, screenDy: number): void {
     this.cancelAnimation();
-    const rect = this.canvas.getBoundingClientRect();
+    const rect = this.getRect();
     this.centerX -= (screenDx / rect.width) * 2 * this.halfW;
     this.centerY += (screenDy / rect.height) * 2 * this.halfH;
     this.requestRender();
@@ -511,6 +533,9 @@ export class Renderer {
   }
 
   resize(): void {
+    if (!this.resizeDirty) return;
+    this.resizeDirty = false;
+
     const dpr = window.devicePixelRatio || 1;
     const displayWidth = Math.round(this.canvas.clientWidth * dpr);
     const displayHeight = Math.round(this.canvas.clientHeight * dpr);
@@ -569,5 +594,6 @@ export class Renderer {
   destroy(): void {
     this.abortController.abort();
     this.cancelAnimation();
+    this.resizeObserver.disconnect();
   }
 }
