@@ -178,6 +178,7 @@ export class Renderer {
     this.resizeObserver = new ResizeObserver(() => {
       this.resizeDirty = true;
       this.cachedRect = null;
+      this.requestRender();
     });
     this.resizeObserver.observe(this.canvas);
 
@@ -281,18 +282,19 @@ export class Renderer {
     if (!vao) throw new Error("Failed to create edge VAO");
     gl.bindVertexArray(vao);
 
-    // Arrow template: shaft (2 triangles) + arrowhead (1 triangle) = 9 vertices
+    // Arrow template: 7 unique vertices, indexed as 3 triangles (shaft quad + head)
     // Each vertex: (tParam, perpOffset, flag)
     const SHAFT_HW = 0.2;
     const HEAD_HW = 0.7;
     // prettier-ignore
     const template = new Float32Array([
-      // Shaft triangle 1
-      0, -SHAFT_HW, 0,   1, -SHAFT_HW, 0,   1,  SHAFT_HW, 0,
-      // Shaft triangle 2
-      0, -SHAFT_HW, 0,   1,  SHAFT_HW, 0,   0,  SHAFT_HW, 0,
-      // Head triangle
-      0, -HEAD_HW,  1,   0,  0,        2,   0,  HEAD_HW,  1,
+      0, -SHAFT_HW, 0,   // 0: shaft bottom-left
+      1, -SHAFT_HW, 0,   // 1: shaft bottom-right
+      1,  SHAFT_HW, 0,   // 2: shaft top-right
+      0,  SHAFT_HW, 0,   // 3: shaft top-left
+      0, -HEAD_HW,  1,   // 4: head bottom
+      0,  0,        2,   // 5: head tip
+      0,  HEAD_HW,  1,   // 6: head top
     ]);
 
     const templateBuf = gl.createBuffer();
@@ -300,6 +302,17 @@ export class Renderer {
     gl.bufferData(gl.ARRAY_BUFFER, template, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+    // Index buffer for 3 triangles (reuses shared shaft vertices)
+    // prettier-ignore
+    const indices = new Uint8Array([
+      0, 1, 2,   // shaft triangle 1
+      0, 2, 3,   // shaft triangle 2
+      4, 5, 6,   // head triangle
+    ]);
+    const indexBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuf);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Single interleaved instance buffer
     // Per edge: [srcX, srcY, tgtX, tgtY, r, g, b, a] = 8 floats = 32 bytes
@@ -597,7 +610,7 @@ export class Renderer {
         this.centerY + this.halfH,
       );
       gl.bindVertexArray(this.edgeVao);
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 9, this.edgeCount);
+      gl.drawElementsInstanced(gl.TRIANGLES, 9, gl.UNSIGNED_BYTE, 0, this.edgeCount);
     }
 
     // Draw nodes on top

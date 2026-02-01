@@ -51,7 +51,7 @@ uniform float u_headLength;
 uniform float u_nodeRadius;
 uniform vec4 u_viewport;
 
-out vec4 v_color;
+flat out vec4 v_color;
 
 void main() {
   // Viewport frustum cull — before expensive math
@@ -106,7 +106,7 @@ void main() {
 export const edgeFragmentSource = `#version 300 es
 precision mediump float;
 
-in vec4 v_color;
+flat in vec4 v_color;
 
 out vec4 outColor;
 
