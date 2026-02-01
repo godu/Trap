@@ -57,7 +57,8 @@ export class Renderer {
   private program: WebGLProgram;
   private vao: WebGLVertexArrayObject;
   private nodeCount: number;
-  private projectionLocation: WebGLUniformLocation;
+  private scaleLocation: WebGLUniformLocation;
+  private offsetLocation: WebGLUniformLocation;
   private nodes: Node[];
   private posBuffer!: WebGLBuffer;
   private colorBuffer!: WebGLBuffer;
@@ -67,7 +68,8 @@ export class Renderer {
   private edgeProgram: WebGLProgram;
   private edgeVao: WebGLVertexArrayObject;
   private edgeCount = 0;
-  private edgeProjLocation: WebGLUniformLocation;
+  private edgeScaleLocation: WebGLUniformLocation;
+  private edgeOffsetLocation: WebGLUniformLocation;
   private edgeHeadLenLocation: WebGLUniformLocation;
   private edgeNodeRadiusLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
@@ -85,8 +87,11 @@ export class Renderer {
   private animFrom = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
   private animTo = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
 
-  // Cached projection matrix (avoids allocation per frame)
-  private projectionMatrix = new Float32Array(16);
+  // Cached projection scalars (orthographic: pos * scale + offset)
+  private projScaleX = 1;
+  private projScaleY = 1;
+  private projOffsetX = 0;
+  private projOffsetY = 0;
 
   // Render throttling
   private renderPending = false;
@@ -119,18 +124,22 @@ export class Renderer {
 
     this.program = createProgram(gl, vertexSource, fragmentSource);
 
-    const loc = gl.getUniformLocation(this.program, "u_projection");
-    if (!loc) throw new Error("u_projection uniform not found");
-    this.projectionLocation = loc;
+    const sLoc = gl.getUniformLocation(this.program, "u_scale");
+    const oLoc = gl.getUniformLocation(this.program, "u_offset");
+    if (!sLoc || !oLoc) throw new Error("u_scale/u_offset uniform not found");
+    this.scaleLocation = sLoc;
+    this.offsetLocation = oLoc;
 
     this.vao = this.setupGeometry(gl, options.nodes);
 
     // Edge program
     this.edgeProgram = createProgram(gl, edgeVertexSource, edgeFragmentSource);
 
-    const eProjLoc = gl.getUniformLocation(this.edgeProgram, "u_projection");
-    if (!eProjLoc) throw new Error("u_projection not found in edge program");
-    this.edgeProjLocation = eProjLoc;
+    const esLoc = gl.getUniformLocation(this.edgeProgram, "u_scale");
+    const eoLoc = gl.getUniformLocation(this.edgeProgram, "u_offset");
+    if (!esLoc || !eoLoc) throw new Error("u_scale/u_offset not found in edge program");
+    this.edgeScaleLocation = esLoc;
+    this.edgeOffsetLocation = eoLoc;
 
     const eHeadLoc = gl.getUniformLocation(this.edgeProgram, "u_headLength");
     if (!eHeadLoc) throw new Error("u_headLength not found");
@@ -155,6 +164,7 @@ export class Renderer {
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(0.067, 0.067, 0.067, 1.0);
 
     this.resizeObserver = new ResizeObserver(() => {
       this.resizeDirty = true;
@@ -549,18 +559,10 @@ export class Renderer {
   }
 
   private updateProjection(): void {
-    const left = this.centerX - this.halfW;
-    const right = this.centerX + this.halfW;
-    const bottom = this.centerY - this.halfH;
-    const top = this.centerY + this.halfH;
-
-    const m = this.projectionMatrix;
-    m[0] = 2 / (right - left);
-    m[5] = 2 / (top - bottom);
-    m[10] = -1;
-    m[12] = -(right + left) / (right - left);
-    m[13] = -(top + bottom) / (top - bottom);
-    m[15] = 1;
+    this.projScaleX = 1 / this.halfW;
+    this.projScaleY = 1 / this.halfH;
+    this.projOffsetX = -this.centerX / this.halfW;
+    this.projOffsetY = -this.centerY / this.halfH;
   }
 
   render(): void {
@@ -568,27 +570,26 @@ export class Renderer {
 
     this.resize();
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-
-    gl.clearColor(0.067, 0.067, 0.067, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     this.updateProjection();
+    const { projScaleX, projScaleY, projOffsetX, projOffsetY } = this;
 
     // Draw edges behind nodes
     if (this.edgeCount > 0) {
       gl.useProgram(this.edgeProgram);
-      gl.uniformMatrix4fv(this.edgeProjLocation, false, this.projectionMatrix);
+      gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
+      gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
       gl.bindVertexArray(this.edgeVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 9, this.edgeCount);
-      gl.bindVertexArray(null);
     }
 
     // Draw nodes on top
     gl.useProgram(this.program);
-    gl.uniformMatrix4fv(this.projectionLocation, false, this.projectionMatrix);
+    gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
+    gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
-    gl.bindVertexArray(null);
   }
 
   destroy(): void {
