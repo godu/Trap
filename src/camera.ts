@@ -7,6 +7,13 @@ export interface Bounds {
   maxY: number;
 }
 
+export interface CameraView {
+  centerX: number;
+  centerY: number;
+  halfW: number;
+  halfH: number;
+}
+
 export function computeBounds(nodes: Node[]): Bounds {
   let minX = Infinity;
   let maxX = -Infinity;
@@ -24,16 +31,16 @@ export function computeBounds(nodes: Node[]): Bounds {
   return { minX, maxX, minY, maxY };
 }
 
-export function createProjectionMatrix(
+export function computeFitView(
   bounds: Bounds,
   canvasWidth: number,
   canvasHeight: number,
-): Float32Array {
+): CameraView {
   const padding = 0.1;
   const dataW = bounds.maxX - bounds.minX;
   const dataH = bounds.maxY - bounds.minY;
-  const cx = (bounds.minX + bounds.maxX) / 2;
-  const cy = (bounds.minY + bounds.maxY) / 2;
+  const centerX = (bounds.minX + bounds.maxX) / 2;
+  const centerY = (bounds.minY + bounds.maxY) / 2;
 
   const aspect = canvasWidth / canvasHeight;
   const dataAspect = dataW / dataH;
@@ -49,10 +56,14 @@ export function createProjectionMatrix(
     halfW = halfH * aspect;
   }
 
-  const left = cx - halfW;
-  const right = cx + halfW;
-  const bottom = cy - halfH;
-  const top = cy + halfH;
+  return { centerX, centerY, halfW, halfH };
+}
+
+export function createProjectionFromView(view: CameraView): Float32Array {
+  const left = view.centerX - view.halfW;
+  const right = view.centerX + view.halfW;
+  const bottom = view.centerY - view.halfH;
+  const top = view.centerY + view.halfH;
 
   // Column-major orthographic projection matrix
   const m = new Float32Array(16);
@@ -64,4 +75,12 @@ export function createProjectionMatrix(
   m[15] = 1;
 
   return m;
+}
+
+export function createProjectionMatrix(
+  bounds: Bounds,
+  canvasWidth: number,
+  canvasHeight: number,
+): Float32Array {
+  return createProjectionFromView(computeFitView(bounds, canvasWidth, canvasHeight));
 }

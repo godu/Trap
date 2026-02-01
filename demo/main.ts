@@ -42,3 +42,7 @@ renderer.render();
 window.addEventListener("resize", () => {
   renderer.render();
 });
+
+document.getElementById("fit-btn")?.addEventListener("click", () => {
+  renderer.fitToNodes();
+});
