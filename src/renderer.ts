@@ -277,6 +277,10 @@ export class Renderer {
   private hoveredNodeId: string | null = null;
   private hoveredEdgeId: string | null = null;
 
+  // Cached sorted arrays for animation (sort once, reuse every frame)
+  private sortedTargetNodes: Node[] | null = null;
+  private sortedTargetEdges: Edge[] | null = null;
+
   // Pre-allocated node buffer pool (grow-by-doubling, reused across frames)
   private nodeBufferCapacity = 0;
   private nodeArrayBuf: ArrayBuffer | null = null;
@@ -797,6 +801,14 @@ export class Renderer {
     }
     this.dataAnimStart = performance.now();
 
+    // Sort targets once at animation start (zIndex order doesn't change mid-animation)
+    const rawNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    this.sortedTargetNodes = rawNodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
+    this.sortedTargetEdges = rawEdges.length > 0
+      ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+      : null;
+
     const animate = (now: number): void => {
       const elapsed = now - this.dataAnimStart;
       const rawT = Math.min(elapsed / this.dataAnimDuration, 1);
@@ -827,6 +839,8 @@ export class Renderer {
         this.oldEdges = [];
         this.oldEdgeMap.clear();
         this.targetEdges = [];
+        this.sortedTargetNodes = null;
+        this.sortedTargetEdges = null;
       }
     };
 
@@ -834,8 +848,7 @@ export class Renderer {
   }
 
   private interpolateNodes(t: number): void {
-    const raw = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
-    const target = raw.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const target = this.sortedTargetNodes!;
     this.ensureNodeBuffer(target.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
@@ -881,9 +894,8 @@ export class Renderer {
   }
 
   private interpolateEdges(t: number): void {
-    const raw = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
-    if (raw.length === 0) return;
-    const target = raw.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    if (!this.sortedTargetEdges) return;
+    const target = this.sortedTargetEdges;
 
     // Build interpolated node positions for resolving edge endpoints
     const targetNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
