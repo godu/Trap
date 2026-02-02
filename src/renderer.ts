@@ -47,12 +47,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function easeInOutCubic(t: number): number {
-  if (t < 0.5) return 4 * t * t * t;
-  const k = -2 * t + 2;
-  return 1 - (k * k * k) / 2;
-}
-
 function easeOutCubic(t: number): number {
   const k = 1 - t;
   return 1 - k * k * k;
@@ -72,6 +66,101 @@ function packPremultiplied(r: number, g: number, b: number, a: number): number {
 const EDGE_STRIDE = 32; // bytes per edge instance
 const CURVATURE = 0.4;
 const CLICK_THRESHOLD = 5; // px
+
+/**
+ * Minimum squared distance from point (px,py) to quadratic Bezier P0→P1→P2.
+ * Solves the cubic D'(t)=0 analytically instead of sampling.
+ */
+const _roots = new Float64Array(5);
+export function distSqToBezier(
+  px: number,
+  py: number,
+  p0x: number,
+  p0y: number,
+  p1x: number,
+  p1y: number,
+  p2x: number,
+  p2y: number,
+): number {
+  // B(t) = At² + Bt + P0, where A = P0-2P1+P2, B = 2(P1-P0)
+  const ax = p0x - 2 * p1x + p2x;
+  const ay = p0y - 2 * p1y + p2y;
+  const bx = 2 * (p1x - p0x);
+  const by = 2 * (p1y - p0y);
+  const cx = p0x - px;
+  const cy = p0y - py;
+
+  // D'(t) = 2(2At+B)·(At²+Bt+C) = 0 → c3t³ + c2t² + c1t + c0 = 0
+  const c3 = 2 * (ax * ax + ay * ay);
+  const c2 = 3 * (ax * bx + ay * by);
+  const c1 = 2 * (ax * cx + ay * cy) + bx * bx + by * by;
+  const c0 = bx * cx + by * cy;
+
+  let n = 0;
+  _roots[n++] = 0;
+  _roots[n++] = 1;
+
+  if (Math.abs(c3) < 1e-10) {
+    if (Math.abs(c2) > 1e-10) {
+      const disc = c1 * c1 - 4 * c2 * c0;
+      if (disc >= 0) {
+        const sq = Math.sqrt(disc);
+        const t1 = (-c1 + sq) / (2 * c2);
+        const t2 = (-c1 - sq) / (2 * c2);
+        if (t1 > 0 && t1 < 1) _roots[n++] = t1;
+        if (t2 > 0 && t2 < 1) _roots[n++] = t2;
+      }
+    } else if (Math.abs(c1) > 1e-10) {
+      const t = -c0 / c1;
+      if (t > 0 && t < 1) _roots[n++] = t;
+    }
+  } else {
+    const p = c2 / c3;
+    const q = c1 / c3;
+    const r = c0 / c3;
+    const p3 = p / 3;
+    const alpha = q - (p * p) / 3;
+    const beta = (2 * p * p * p) / 27 - (p * q) / 3 + r;
+    const D = (beta * beta) / 4 + (alpha * alpha * alpha) / 27;
+
+    if (D > 1e-10) {
+      const sq = Math.sqrt(D);
+      const t = Math.cbrt(-beta / 2 + sq) + Math.cbrt(-beta / 2 - sq) - p3;
+      if (t > 0 && t < 1) _roots[n++] = t;
+    } else if (D < -1e-10) {
+      const rMag = Math.sqrt(-(alpha * alpha * alpha) / 27);
+      const theta = Math.acos(Math.max(-1, Math.min(1, -beta / (2 * rMag))));
+      const cbrtR = Math.cbrt(rMag);
+      const t1 = 2 * cbrtR * Math.cos(theta / 3) - p3;
+      const t2 = 2 * cbrtR * Math.cos((theta + 2 * Math.PI) / 3) - p3;
+      const t3 = 2 * cbrtR * Math.cos((theta + 4 * Math.PI) / 3) - p3;
+      if (t1 > 0 && t1 < 1) _roots[n++] = t1;
+      if (t2 > 0 && t2 < 1) _roots[n++] = t2;
+      if (t3 > 0 && t3 < 1) _roots[n++] = t3;
+    } else {
+      if (Math.abs(beta) < 1e-10) {
+        const t = -p3;
+        if (t > 0 && t < 1) _roots[n++] = t;
+      } else {
+        const u = Math.cbrt(-beta / 2);
+        const t1 = 2 * u - p3;
+        const t2 = -u - p3;
+        if (t1 > 0 && t1 < 1) _roots[n++] = t1;
+        if (t2 > 0 && t2 < 1) _roots[n++] = t2;
+      }
+    }
+  }
+
+  let min = Infinity;
+  for (let i = 0; i < n; i++) {
+    const t = _roots[i];
+    const dx = ax * t * t + bx * t + cx;
+    const dy = ay * t * t + by * t + cy;
+    const dSq = dx * dx + dy * dy;
+    if (dSq < min) min = dSq;
+  }
+  return min;
+}
 
 // Reusable result object for sampleBezier (avoids allocation per call)
 const bezierResult = { x: 0, y: 0 };
@@ -1039,14 +1128,12 @@ export class Renderer {
   }
 
   private hitTestEdge(worldX: number, worldY: number): Edge | null {
-    // Tolerance: ~5px in world coords
     const rect = this.getRect();
     const worldPerPx = (this.halfW * 2) / rect.width;
-    const tolerance = worldPerPx * 5;
-    const tolSq = tolerance * tolerance;
+    const baseTol = worldPerPx * 5;
 
     let closest: Edge | null = null;
-    let closestDistSq = tolSq;
+    let closestDistSq = Infinity;
 
     for (let i = 0; i < this.edgeObjects.length; i++) {
       const edge = this.edgeObjects[i];
@@ -1054,24 +1141,31 @@ export class Renderer {
       const tgt = this.nodeMap.get(edge.target);
       if (!src || !tgt) continue;
 
-      // Quick bounding box check
-      const minX = Math.min(src.x, tgt.x) - tolerance;
-      const maxX = Math.max(src.x, tgt.x) + tolerance;
-      const minY = Math.min(src.y, tgt.y) - tolerance;
-      const maxY = Math.max(src.y, tgt.y) + tolerance;
+      // Per-edge tolerance = 5px + half the rendered edge width
+      const halfW = (edge.width ?? 1.0) / 2;
+      const edgeTol = baseTol + halfW;
+
+      // Compute Bezier control point
+      const dx = tgt.x - src.x;
+      const dy = tgt.y - src.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.0001) continue;
+      const curveDist = len * CURVATURE;
+      const ctrlX = (src.x + tgt.x) * 0.5 + (-dy / len) * curveDist;
+      const ctrlY = (src.y + tgt.y) * 0.5 + (dx / len) * curveDist;
+
+      // Tight bbox — Bezier convex hull + edge width + pixel tolerance
+      const minX = Math.min(src.x, tgt.x, ctrlX) - edgeTol;
+      const maxX = Math.max(src.x, tgt.x, ctrlX) + edgeTol;
+      const minY = Math.min(src.y, tgt.y, ctrlY) - edgeTol;
+      const maxY = Math.max(src.y, tgt.y, ctrlY) + edgeTol;
       if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue;
 
-      // Sample Bezier at 16 points
-      for (let s = 0; s <= 16; s++) {
-        const t = s / 16;
-        const pt = sampleBezier(src.x, src.y, tgt.x, tgt.y, CURVATURE, t);
-        const dx = worldX - pt.x;
-        const dy = worldY - pt.y;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < closestDistSq) {
-          closestDistSq = dSq;
-          closest = edge;
-        }
+      // Analytical closest-point distance to center line
+      const dSq = distSqToBezier(worldX, worldY, src.x, src.y, ctrlX, ctrlY, tgt.x, tgt.y);
+      if (dSq < edgeTol * edgeTol && dSq < closestDistSq) {
+        closestDistSq = dSq;
+        closest = edge;
       }
     }
 
@@ -1083,7 +1177,7 @@ export class Renderer {
   private setupInteraction(): void {
     const signal = this.abortController.signal;
     const canvas = this.canvas;
-    canvas.style.cursor = "grab";
+    canvas.style.cursor = "default";
 
     // Wheel zoom
     canvas.addEventListener(
@@ -1137,7 +1231,7 @@ export class Renderer {
             this.handleClick(e);
           }
           this.isDragging = false;
-          canvas.style.cursor = "grab";
+          canvas.style.cursor = "default";
         }
       },
       { signal },
@@ -1337,7 +1431,7 @@ export class Renderer {
         this.hoveredEdgeId = edgeId;
       }
 
-      this.canvas.style.cursor = edgeId ? "pointer" : "grab";
+      this.canvas.style.cursor = "default";
     } else {
       // Hovering a node — clear any edge hover
       if (this.hoveredEdgeId) {
@@ -1356,7 +1450,7 @@ export class Renderer {
         }
         this.hoveredEdgeId = null;
       }
-      this.canvas.style.cursor = "pointer";
+      this.canvas.style.cursor = "default";
     }
   }
 
@@ -1453,7 +1547,7 @@ export class Renderer {
     const animate = (now: number): void => {
       const elapsed = now - this.animStartTime;
       const t = Math.min(elapsed / this.animDuration, 1);
-      const e = easeInOutCubic(t);
+      const e = this.dataAnimEasing(t);
 
       this.centerX = lerp(this.animFrom.centerX, this.animTo.centerX, e);
       this.centerY = lerp(this.animFrom.centerY, this.animTo.centerY, e);
