@@ -1,8 +1,8 @@
 ---
-name: optimise
+name: performance
 description: |
   Performance optimization for WebGL2 rendering and JS runtime code.
-  Triggers: (1) /optimise command with optional file/area argument,
+  Triggers: (1) /performance command with optional file/area argument,
   (2) "optimize", "performance", "slow", "bottleneck" in conversation,
   (3) when spotting perf anti-patterns during normal code work.
   Analyzes GPU pipeline and JS runtime, then applies fixes directly.
