@@ -1,7 +1,7 @@
 export const vertexSource = `#version 300 es
 layout(location = 0) in vec2 a_quadVertex;
 layout(location = 1) in vec2 a_position;
-layout(location = 2) in vec3 a_color;
+layout(location = 2) in vec4 a_color;
 layout(location = 3) in float a_radius;
 
 uniform vec2 u_scale;
@@ -11,7 +11,7 @@ out vec3 v_color;
 out vec2 v_uv;
 
 void main() {
-  v_color = a_color;
+  v_color = a_color.rgb;
   v_uv = a_quadVertex;
   vec2 worldPos = a_position + a_quadVertex * a_radius;
   gl_Position = vec4(worldPos * u_scale + u_offset, 0.0, 1.0);
