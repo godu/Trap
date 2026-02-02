@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toRenderNodes, toEdgeBuffer, packPremultiplied } from "../demo/graph/convert";
+import { toRenderNodes, toEdges } from "../demo/graph/convert";
 import type { GraphStep } from "../demo/graph/types";
 
 function makeStep(
@@ -28,6 +28,18 @@ describe("toRenderNodes", () => {
     ]);
     const nodes = toRenderNodes(step);
     expect(nodes).toHaveLength(2);
+  });
+
+  it("includes node id", () => {
+    const step = makeStep([["myId", "aws:iam:role", 0, 0]]);
+    const nodes = toRenderNodes(step);
+    expect(nodes[0].id).toBe("myId");
+  });
+
+  it("includes opacity", () => {
+    const step = makeStep([["a", "aws:iam:role", 0, 0]]);
+    const nodes = toRenderNodes(step);
+    expect(nodes[0].opacity).toBe(1.0);
   });
 
   it("maps node types to correct RGB colors", () => {
@@ -97,8 +109,8 @@ describe("toRenderNodes", () => {
   });
 });
 
-describe("toEdgeBuffer", () => {
-  it("returns correct byte length (count * 28)", () => {
+describe("toEdges", () => {
+  it("returns correct count", () => {
     const step = makeStep(
       [
         ["a", "aws:iam:role", 10, 20],
@@ -106,47 +118,11 @@ describe("toEdgeBuffer", () => {
       ],
       [["a", "b", "privilege"]],
     );
-    const { buffer, count } = toEdgeBuffer(step);
-
-    expect(count).toBe(1);
-    expect(buffer.byteLength).toBe(28);
+    const edges = toEdges(step);
+    expect(edges).toHaveLength(1);
   });
 
-  it("encodes positions and radii correctly as Float32", () => {
-    const step = makeStep(
-      [
-        ["a", "test", 10, 20],
-        ["b", "test", 30, 40],
-      ],
-      [["a", "b", "privilege"]],
-    );
-    const { buffer } = toEdgeBuffer(step);
-
-    const f32 = new Float32Array(buffer.buffer, buffer.byteOffset, 6);
-    expect(f32[0]).toBeCloseTo(10); // srcX
-    expect(f32[1]).toBeCloseTo(20); // srcY
-    expect(f32[2]).toBeCloseTo(30); // tgtX
-    expect(f32[3]).toBeCloseTo(40); // tgtY
-    expect(f32[4]).toBeCloseTo(2.0); // srcRadius (default)
-    expect(f32[5]).toBeCloseTo(2.0); // tgtRadius (default)
-  });
-
-  it("encodes selected node radii", () => {
-    const step = makeStep(
-      [
-        ["a", "test", 0, 0, true],
-        ["b", "test", 1, 1],
-      ],
-      [["a", "b", "privilege"]],
-    );
-    const { buffer } = toEdgeBuffer(step);
-
-    const f32 = new Float32Array(buffer.buffer, buffer.byteOffset, 6);
-    expect(f32[4]).toBeCloseTo(3.0); // srcRadius (selected)
-    expect(f32[5]).toBeCloseTo(2.0); // tgtRadius (default)
-  });
-
-  it("packs RGBA correctly for privilege edges", () => {
+  it("generates edge id from source->target", () => {
     const step = makeStep(
       [
         ["a", "test", 0, 0],
@@ -154,15 +130,39 @@ describe("toEdgeBuffer", () => {
       ],
       [["a", "b", "privilege"]],
     );
-    const { buffer } = toEdgeBuffer(step);
-
-    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 7);
-    const expected = packPremultiplied(0.3, 0.55, 0.75, 0.4);
-    // packPremultiplied returns signed int32, Uint32Array stores unsigned
-    expect(u32[6]).toBe(expected >>> 0);
+    const edges = toEdges(step);
+    expect(edges[0].id).toBe("a->b");
   });
 
-  it("packs RGBA correctly for escalation edges", () => {
+  it("sets source and target node ids", () => {
+    const step = makeStep(
+      [
+        ["a", "test", 0, 0],
+        ["b", "test", 1, 1],
+      ],
+      [["a", "b", "privilege"]],
+    );
+    const edges = toEdges(step);
+    expect(edges[0].source).toBe("a");
+    expect(edges[0].target).toBe("b");
+  });
+
+  it("maps privilege edges to correct RGBA", () => {
+    const step = makeStep(
+      [
+        ["a", "test", 0, 0],
+        ["b", "test", 1, 1],
+      ],
+      [["a", "b", "privilege"]],
+    );
+    const edges = toEdges(step);
+    expect(edges[0].r).toBeCloseTo(0.3);
+    expect(edges[0].g).toBeCloseTo(0.55);
+    expect(edges[0].b).toBeCloseTo(0.75);
+    expect(edges[0].a).toBeCloseTo(0.4);
+  });
+
+  it("maps escalation edges to correct RGBA", () => {
     const step = makeStep(
       [
         ["a", "test", 0, 0],
@@ -170,23 +170,23 @@ describe("toEdgeBuffer", () => {
       ],
       [["a", "b", "escalation"]],
     );
-    const { buffer } = toEdgeBuffer(step);
-
-    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 7);
-    const expected = packPremultiplied(0.9, 0.25, 0.2, 0.6);
-    expect(u32[6]).toBe(expected >>> 0);
+    const edges = toEdges(step);
+    expect(edges[0].r).toBeCloseTo(0.9);
+    expect(edges[0].g).toBeCloseTo(0.25);
+    expect(edges[0].b).toBeCloseTo(0.2);
+    expect(edges[0].a).toBeCloseTo(0.6);
   });
 
   it("skips edges with missing source node", () => {
     const step = makeStep([["b", "test", 1, 1]], [["a", "b", "privilege"]]);
-    const { count } = toEdgeBuffer(step);
-    expect(count).toBe(0);
+    const edges = toEdges(step);
+    expect(edges).toHaveLength(0);
   });
 
   it("skips edges with missing target node", () => {
     const step = makeStep([["a", "test", 1, 1]], [["a", "b", "privilege"]]);
-    const { count } = toEdgeBuffer(step);
-    expect(count).toBe(0);
+    const edges = toEdges(step);
+    expect(edges).toHaveLength(0);
   });
 
   it("handles multiple edges from multiple sources", () => {
@@ -202,33 +202,7 @@ describe("toEdgeBuffer", () => {
         ["b", "c", "privilege"],
       ],
     );
-    const { buffer, count } = toEdgeBuffer(step);
-
-    expect(count).toBe(3);
-    expect(buffer.byteLength).toBe(84);
-  });
-});
-
-describe("packPremultiplied", () => {
-  it("packs fully opaque white correctly", () => {
-    const packed = packPremultiplied(1, 1, 1, 1);
-    expect(packed & 0xff).toBe(255); // R
-    expect((packed >> 8) & 0xff).toBe(255); // G
-    expect((packed >> 16) & 0xff).toBe(255); // B
-    expect((packed >>> 24) & 0xff).toBe(255); // A
-  });
-
-  it("premultiplies alpha", () => {
-    const packed = packPremultiplied(1, 1, 1, 0.5);
-    const r = packed & 0xff;
-    const g = (packed >> 8) & 0xff;
-    const b = (packed >> 16) & 0xff;
-    const a = (packed >>> 24) & 0xff;
-
-    // 1.0 * 0.5 * 255 ≈ 128
-    expect(r).toBe(128);
-    expect(g).toBe(128);
-    expect(b).toBe(128);
-    expect(a).toBe(128);
+    const edges = toEdges(step);
+    expect(edges).toHaveLength(3);
   });
 });

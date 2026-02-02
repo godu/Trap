@@ -7,11 +7,11 @@ layout(location = 3) in float a_radius;
 uniform vec2 u_scale;
 uniform vec2 u_offset;
 
-flat out vec3 v_color;
+flat out vec4 v_color;
 out vec2 v_uv;
 
 void main() {
-  v_color = a_color.rgb;
+  v_color = a_color;
   v_uv = a_quadVertex;
   vec2 worldPos = a_position + a_quadVertex * a_radius;
   gl_Position = vec4(worldPos * u_scale + u_offset, 0.0, 1.0);
@@ -21,7 +21,7 @@ void main() {
 export const fragmentSource = `#version 300 es
 precision mediump float;
 
-flat in vec3 v_color;
+flat in vec4 v_color;
 in vec2 v_uv;
 
 out vec4 outColor;
@@ -29,7 +29,7 @@ out vec4 outColor;
 void main() {
   float dist = dot(v_uv, v_uv);
   float alpha = 1.0 - smoothstep(0.81, 1.0, dist);
-  outColor = vec4(v_color * alpha, alpha);
+  outColor = vec4(v_color.rgb * alpha, alpha * v_color.a);
 }
 `;
 
@@ -44,6 +44,7 @@ layout(location = 1) in vec2 a_source;
 layout(location = 2) in vec2 a_target;
 layout(location = 3) in vec4 a_color;
 layout(location = 4) in vec2 a_radii;
+layout(location = 5) in float a_width;
 
 uniform vec2 u_scale;
 uniform vec2 u_offset;
@@ -109,7 +110,7 @@ void main() {
   float headT = headLen / speed0;
 
   float tParam = a_template.x;
-  float perpOffset = a_template.y;
+  float perpOffset = a_template.y * a_width;
   float flag = a_template.z;
 
   // Compute Bezier parameter
