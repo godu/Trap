@@ -7,7 +7,7 @@ layout(location = 3) in float a_radius;
 uniform vec2 u_scale;
 uniform vec2 u_offset;
 
-out vec3 v_color;
+flat out vec3 v_color;
 out vec2 v_uv;
 
 void main() {
@@ -19,9 +19,9 @@ void main() {
 `;
 
 export const fragmentSource = `#version 300 es
-precision highp float;
+precision mediump float;
 
-in vec3 v_color;
+flat in vec3 v_color;
 in vec2 v_uv;
 
 out vec4 outColor;

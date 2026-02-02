@@ -48,7 +48,9 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+  if (t < 0.5) return 4 * t * t * t;
+  const k = -2 * t + 2;
+  return 1 - (k * k * k) / 2;
 }
 
 export class Renderer {
@@ -305,16 +307,16 @@ export class Renderer {
     const f32 = new Float32Array(buf);
     const u8 = new Uint8Array(buf);
     for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
       const fi = i * 4; // float index (16 bytes / 4)
       const bi = i * 16; // byte index
-      f32[fi] = nodes[i].x;
-      f32[fi + 1] = nodes[i].y;
-      // Pack RGB as normalized u8 at byte offset 8
-      u8[bi + 8] = (nodes[i].r * 255 + 0.5) | 0;
-      u8[bi + 9] = (nodes[i].g * 255 + 0.5) | 0;
-      u8[bi + 10] = (nodes[i].b * 255 + 0.5) | 0;
-      u8[bi + 11] = 255; // alpha
-      f32[fi + 3] = nodes[i].radius;
+      f32[fi] = node.x;
+      f32[fi + 1] = node.y;
+      u8[bi + 8] = (node.r * 255 + 0.5) | 0;
+      u8[bi + 9] = (node.g * 255 + 0.5) | 0;
+      u8[bi + 10] = (node.b * 255 + 0.5) | 0;
+      u8[bi + 11] = 255;
+      f32[fi + 3] = node.radius;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
