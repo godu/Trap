@@ -100,7 +100,10 @@ describe("toRenderNodes", () => {
 describe("toEdgeBuffer", () => {
   it("returns correct byte length (count * 20)", () => {
     const step = makeStep(
-      [["a", "aws:iam:role", 10, 20], ["b", "aws:ec2:instance", 30, 40]],
+      [
+        ["a", "aws:iam:role", 10, 20],
+        ["b", "aws:ec2:instance", 30, 40],
+      ],
       [["a", "b", "privilege"]],
     );
     const { buffer, count } = toEdgeBuffer(step);
@@ -111,7 +114,10 @@ describe("toEdgeBuffer", () => {
 
   it("encodes positions correctly as Float32", () => {
     const step = makeStep(
-      [["a", "test", 10, 20], ["b", "test", 30, 40]],
+      [
+        ["a", "test", 10, 20],
+        ["b", "test", 30, 40],
+      ],
       [["a", "b", "privilege"]],
     );
     const { buffer } = toEdgeBuffer(step);
@@ -125,7 +131,10 @@ describe("toEdgeBuffer", () => {
 
   it("packs RGBA correctly for privilege edges", () => {
     const step = makeStep(
-      [["a", "test", 0, 0], ["b", "test", 1, 1]],
+      [
+        ["a", "test", 0, 0],
+        ["b", "test", 1, 1],
+      ],
       [["a", "b", "privilege"]],
     );
     const { buffer } = toEdgeBuffer(step);
@@ -138,7 +147,10 @@ describe("toEdgeBuffer", () => {
 
   it("packs RGBA correctly for escalation edges", () => {
     const step = makeStep(
-      [["a", "test", 0, 0], ["b", "test", 1, 1]],
+      [
+        ["a", "test", 0, 0],
+        ["b", "test", 1, 1],
+      ],
       [["a", "b", "escalation"]],
     );
     const { buffer } = toEdgeBuffer(step);
@@ -149,26 +161,24 @@ describe("toEdgeBuffer", () => {
   });
 
   it("skips edges with missing source node", () => {
-    const step = makeStep(
-      [["b", "test", 1, 1]],
-      [["a", "b", "privilege"]],
-    );
+    const step = makeStep([["b", "test", 1, 1]], [["a", "b", "privilege"]]);
     const { count } = toEdgeBuffer(step);
     expect(count).toBe(0);
   });
 
   it("skips edges with missing target node", () => {
-    const step = makeStep(
-      [["a", "test", 1, 1]],
-      [["a", "b", "privilege"]],
-    );
+    const step = makeStep([["a", "test", 1, 1]], [["a", "b", "privilege"]]);
     const { count } = toEdgeBuffer(step);
     expect(count).toBe(0);
   });
 
   it("handles multiple edges from multiple sources", () => {
     const step = makeStep(
-      [["a", "test", 0, 0], ["b", "test", 10, 10], ["c", "test", 20, 20]],
+      [
+        ["a", "test", 0, 0],
+        ["b", "test", 10, 10],
+        ["c", "test", 20, 20],
+      ],
       [
         ["a", "b", "privilege"],
         ["a", "c", "escalation"],
@@ -185,10 +195,10 @@ describe("toEdgeBuffer", () => {
 describe("packPremultiplied", () => {
   it("packs fully opaque white correctly", () => {
     const packed = packPremultiplied(1, 1, 1, 1);
-    expect(packed & 0xff).toBe(255);           // R
-    expect((packed >> 8) & 0xff).toBe(255);    // G
-    expect((packed >> 16) & 0xff).toBe(255);   // B
-    expect((packed >>> 24) & 0xff).toBe(255);  // A
+    expect(packed & 0xff).toBe(255); // R
+    expect((packed >> 8) & 0xff).toBe(255); // G
+    expect((packed >> 16) & 0xff).toBe(255); // B
+    expect((packed >>> 24) & 0xff).toBe(255); // A
   });
 
   it("premultiplies alpha", () => {
