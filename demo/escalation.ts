@@ -1,6 +1,6 @@
 import { Renderer } from "../src/index";
-import { computeLayout, toRenderNodes, toEdgeBuffer } from "../src/graph/index";
-import type { GraphStep } from "../src/graph/types";
+import { toRenderNodes, toEdgeBuffer } from "./graph/convert";
+import type { GraphStep } from "./graph/types";
 import {
   FIRST_STEP_NODES,
   FIRST_STEP_EDGES,
@@ -16,13 +16,10 @@ const steps: GraphStep[] = [
   { nodes: THIRD_STEP_NODES, edges: THIRD_STEP_EDGES },
 ];
 
-// Compute layout once across all steps for consistent positions
-const layout = computeLayout(steps);
-
 // Initialize renderer with Step 1
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-const initialNodes = toRenderNodes(steps[0], layout);
-const initialEdges = toEdgeBuffer(steps[0], layout);
+const initialNodes = toRenderNodes(steps[0]);
+const initialEdges = toEdgeBuffer(steps[0]);
 
 const renderer = new Renderer({ canvas, nodes: initialNodes, edgeBuffer: initialEdges.buffer, edgeCount: initialEdges.count });
 renderer.render();
@@ -30,8 +27,8 @@ renderer.fitToNodes(0);
 
 function showStep(index: number) {
   const step = steps[index];
-  const nodes = toRenderNodes(step, layout);
-  const { buffer, count } = toEdgeBuffer(step, layout);
+  const nodes = toRenderNodes(step);
+  const { buffer, count } = toEdgeBuffer(step);
   renderer.setNodes(nodes);
   renderer.setEdges(buffer, count);
   renderer.fitToNodes();
