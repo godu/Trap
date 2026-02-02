@@ -423,8 +423,27 @@ export class Renderer {
     this.edgeCount = count;
     if (count > 0) {
       const gl = this.gl;
+      const BYTES_PER_EDGE = 20;
+      const src = new Uint8Array(buffer.buffer, buffer.byteOffset, count * BYTES_PER_EDGE);
+
+      // Fisher-Yates shuffle so any prefix is a spatially representative sample.
+      // This enables the draw-count cap in render() to produce uniform coverage.
+      const indices = new Uint32Array(count);
+      for (let i = 0; i < count; i++) indices[i] = i;
+      for (let i = count - 1; i > 0; i--) {
+        const j = (Math.random() * (i + 1)) | 0;
+        const t = indices[i];
+        indices[i] = indices[j];
+        indices[j] = t;
+      }
+      const shuffled = new Uint8Array(count * BYTES_PER_EDGE);
+      for (let i = 0; i < count; i++) {
+        const srcOff = indices[i] * BYTES_PER_EDGE;
+        shuffled.set(src.subarray(srcOff, srcOff + BYTES_PER_EDGE), i * BYTES_PER_EDGE);
+      }
+
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
     }
     this.requestRender();
   }
@@ -692,7 +711,11 @@ export class Renderer {
     const projOffsetY = this.projOffsetY;
 
     // Draw edges behind nodes (LOD: lines when zoomed out, arrows when close)
-    if (this.edgeCount > 0) {
+    // Cap instance count to limit fragment overdraw on high-DPI displays.
+    // The edge buffer is shuffled at upload time so any prefix has uniform spatial coverage.
+    const MAX_DRAW_EDGES = 65536;
+    const drawEdges = Math.min(this.edgeCount, MAX_DRAW_EDGES);
+    if (drawEdges > 0) {
       const vpMinX = this.vpMinX;
       const vpMinY = this.vpMinY;
       const vpMaxX = this.vpMaxX;
@@ -726,7 +749,7 @@ export class Renderer {
           this.sentLineVpMaxY = vpMaxY;
         }
         gl.bindVertexArray(this.edgeLineVao);
-        gl.drawArraysInstanced(gl.LINES, 0, 2, this.edgeCount);
+        gl.drawArraysInstanced(gl.LINES, 0, 2, drawEdges);
       } else {
         gl.useProgram(this.edgeProgram);
         if (
@@ -755,7 +778,7 @@ export class Renderer {
           this.sentEdgeVpMaxY = vpMaxY;
         }
         gl.bindVertexArray(this.edgeVao);
-        gl.drawElementsInstanced(gl.TRIANGLES, 9, gl.UNSIGNED_BYTE, 0, this.edgeCount);
+        gl.drawElementsInstanced(gl.TRIANGLES, 9, gl.UNSIGNED_BYTE, 0, drawEdges);
       }
     }
 
