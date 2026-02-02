@@ -110,44 +110,55 @@ export function sampleBezier(
   return bezierResult;
 }
 
+// Pre-allocated shuffle buffers (grow-on-demand, reused across calls)
+let shuffleIndices = new Uint32Array(64);
+let shuffleOutput = new Uint8Array(64 * EDGE_STRIDE);
+
+function ensureShuffleBuffers(count: number): void {
+  if (shuffleIndices.length < count) {
+    let cap = shuffleIndices.length;
+    while (cap < count) cap *= 2;
+    shuffleIndices = new Uint32Array(cap);
+    shuffleOutput = new Uint8Array(cap * EDGE_STRIDE);
+  }
+}
+
 /** Fisher-Yates shuffle of edge buffer within zIndex groups (EDGE_STRIDE bytes per record). */
 function shuffleEdgeBuffer(buf: Uint8Array, count: number, groupSizes?: number[]): Uint8Array {
+  ensureShuffleBuffers(count);
+
   if (!groupSizes || groupSizes.length <= 1) {
-    const indices = new Uint32Array(count);
-    for (let i = 0; i < count; i++) indices[i] = i;
+    for (let i = 0; i < count; i++) shuffleIndices[i] = i;
     for (let i = count - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
-      const tmp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = tmp;
+      const tmp = shuffleIndices[i];
+      shuffleIndices[i] = shuffleIndices[j];
+      shuffleIndices[j] = tmp;
     }
-    const shuffled = new Uint8Array(count * EDGE_STRIDE);
     for (let i = 0; i < count; i++) {
-      const srcOff = indices[i] * EDGE_STRIDE;
-      shuffled.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), i * EDGE_STRIDE);
+      const srcOff = shuffleIndices[i] * EDGE_STRIDE;
+      shuffleOutput.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), i * EDGE_STRIDE);
     }
-    return shuffled;
+    return shuffleOutput.subarray(0, count * EDGE_STRIDE);
   }
 
   // Shuffle within each zIndex group independently
-  const shuffled = new Uint8Array(count * EDGE_STRIDE);
   let offset = 0;
   for (const size of groupSizes) {
-    const indices = new Uint32Array(size);
-    for (let i = 0; i < size; i++) indices[i] = offset + i;
+    for (let i = 0; i < size; i++) shuffleIndices[i] = offset + i;
     for (let i = size - 1; i > 0; i--) {
       const j = (Math.random() * (i + 1)) | 0;
-      const tmp = indices[i];
-      indices[i] = indices[j];
-      indices[j] = tmp;
+      const tmp = shuffleIndices[i];
+      shuffleIndices[i] = shuffleIndices[j];
+      shuffleIndices[j] = tmp;
     }
     for (let i = 0; i < size; i++) {
-      const srcOff = indices[i] * EDGE_STRIDE;
-      shuffled.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), (offset + i) * EDGE_STRIDE);
+      const srcOff = shuffleIndices[i] * EDGE_STRIDE;
+      shuffleOutput.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), (offset + i) * EDGE_STRIDE);
     }
     offset += size;
   }
-  return shuffled;
+  return shuffleOutput.subarray(0, count * EDGE_STRIDE);
 }
 
 export class Renderer {
