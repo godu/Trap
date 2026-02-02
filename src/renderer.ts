@@ -277,6 +277,19 @@ export class Renderer {
   private hoveredNodeId: string | null = null;
   private hoveredEdgeId: string | null = null;
 
+  // Pre-allocated node buffer pool (grow-by-doubling, reused across frames)
+  private nodeBufferCapacity = 0;
+  private nodeArrayBuf: ArrayBuffer | null = null;
+  private nodeF32: Float32Array | null = null;
+  private nodeU8: Uint8Array | null = null;
+
+  // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
+  private edgeBufferCapacity = 0;
+  private edgeArrayBuf: ArrayBuffer | null = null;
+  private edgeF32: Float32Array | null = null;
+  private edgeU32: Uint32Array | null = null;
+  private edgeBufU8: Uint8Array | null = null;
+
   constructor(options: RendererOptions) {
     this.canvas = options.canvas;
     this.nodes = options.nodes;
@@ -458,12 +471,33 @@ export class Renderer {
     return vao;
   }
 
+  private ensureNodeBuffer(count: number): void {
+    if (count <= this.nodeBufferCapacity) return;
+    let cap = this.nodeBufferCapacity || 64;
+    while (cap < count) cap *= 2;
+    this.nodeArrayBuf = new ArrayBuffer(cap * 16);
+    this.nodeF32 = new Float32Array(this.nodeArrayBuf);
+    this.nodeU8 = new Uint8Array(this.nodeArrayBuf);
+    this.nodeBufferCapacity = cap;
+  }
+
+  private ensureEdgeBuffer(count: number): void {
+    if (count <= this.edgeBufferCapacity) return;
+    let cap = this.edgeBufferCapacity || 64;
+    while (cap < count) cap *= 2;
+    this.edgeArrayBuf = new ArrayBuffer(cap * EDGE_STRIDE);
+    this.edgeF32 = new Float32Array(this.edgeArrayBuf);
+    this.edgeU32 = new Uint32Array(this.edgeArrayBuf);
+    this.edgeBufU8 = new Uint8Array(this.edgeArrayBuf);
+    this.edgeBufferCapacity = cap;
+  }
+
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
     // Sort by zIndex for draw ordering (lower zIndex draws first = behind)
     const sorted = nodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const buf = new ArrayBuffer(sorted.length * 16);
-    const f32 = new Float32Array(buf);
-    const u8 = new Uint8Array(buf);
+    this.ensureNodeBuffer(sorted.length);
+    const f32 = this.nodeF32!;
+    const u8 = this.nodeU8!;
     for (let i = 0; i < sorted.length; i++) {
       const node = sorted[i];
       const fi = i * 4; // float index (16 bytes / 4)
@@ -477,8 +511,9 @@ export class Renderer {
       u8[bi + 11] = (opacity * 255 + 0.5) | 0;
       f32[fi + 3] = node.radius;
     }
+    const byteLen = sorted.length * 16;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
   }
 
   private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
@@ -612,9 +647,9 @@ export class Renderer {
   /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
   private packEdgeBuffer(edges: Edge[]): { buffer: Uint8Array; count: number; groupSizes: number[] } {
     const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const arrayBuf = new ArrayBuffer(sorted.length * EDGE_STRIDE);
-    const f32 = new Float32Array(arrayBuf);
-    const u32 = new Uint32Array(arrayBuf);
+    this.ensureEdgeBuffer(sorted.length);
+    const f32 = this.edgeF32!;
+    const u32 = this.edgeU32!;
     let count = 0;
     const groupSizes: number[] = [];
     let currentZ = -Infinity;
@@ -647,7 +682,7 @@ export class Renderer {
     }
     if (groupSize > 0) groupSizes.push(groupSize);
 
-    return { buffer: new Uint8Array(arrayBuf, 0, count * EDGE_STRIDE), count, groupSizes };
+    return { buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE), count, groupSizes };
   }
 
   private setEdgeObjects(edges: Edge[], animate: boolean): void {
@@ -801,9 +836,9 @@ export class Renderer {
   private interpolateNodes(t: number): void {
     const raw = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
     const target = raw.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const buf = new ArrayBuffer(target.length * 16);
-    const f32 = new Float32Array(buf);
-    const u8 = new Uint8Array(buf);
+    this.ensureNodeBuffer(target.length);
+    const f32 = this.nodeF32!;
+    const u8 = this.nodeU8!;
 
     for (let i = 0; i < target.length; i++) {
       const node = target[i];
@@ -838,9 +873,10 @@ export class Renderer {
       }
     }
 
+    const byteLen = target.length * 16;
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
     this.nodeCount = target.length;
   }
 
@@ -865,9 +901,9 @@ export class Renderer {
       }
     }
 
-    const arrayBuf = new ArrayBuffer(target.length * EDGE_STRIDE);
-    const f32 = new Float32Array(arrayBuf);
-    const u32 = new Uint32Array(arrayBuf);
+    this.ensureEdgeBuffer(target.length);
+    const f32 = this.edgeF32!;
+    const u32 = this.edgeU32!;
     let count = 0;
 
     for (let i = 0; i < target.length; i++) {
@@ -904,13 +940,10 @@ export class Renderer {
     this.edgeCount = count;
     if (count > 0) {
       // Skip shuffle during animation frames for performance
+      const byteLen = count * EDGE_STRIDE;
       const gl = this.gl;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(
-        gl.ARRAY_BUFFER,
-        new Uint8Array(arrayBuf, 0, count * EDGE_STRIDE),
-        gl.DYNAMIC_DRAW,
-      );
+      gl.bufferData(gl.ARRAY_BUFFER, this.edgeBufU8!.subarray(0, byteLen), gl.DYNAMIC_DRAW);
     }
   }
 
