@@ -818,8 +818,6 @@ export class Renderer {
       }
     }
 
-    this.initCamera();
-
     if (shouldAnimate) {
       this.startDataAnimation();
     }
