@@ -22,11 +22,13 @@ export function computeBounds(nodes: Node[]): Bounds {
 
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
+    const x = node.x;
+    const y = node.y;
     const r = node.radius;
-    if (node.x - r < minX) minX = node.x - r;
-    if (node.x + r > maxX) maxX = node.x + r;
-    if (node.y - r < minY) minY = node.y - r;
-    if (node.y + r > maxY) maxY = node.y + r;
+    if (x - r < minX) minX = x - r;
+    if (x + r > maxX) maxX = x + r;
+    if (y - r < minY) minY = y - r;
+    if (y + r > maxY) maxY = y + r;
   }
 
   return { minX, maxX, minY, maxY };
