@@ -1,5 +1,5 @@
-import type { Node } from "../types";
-import type { GraphStep, LayoutResult } from "./types";
+import type { Node } from "../../src/types";
+import type { GraphStep } from "./types";
 
 const NODE_TYPE_COLORS: Record<string, [number, number, number]> = {
   "aws:dynamodb:table": [0.29, 0.47, 0.82],
@@ -31,16 +31,14 @@ export function packPremultiplied(r: number, g: number, b: number, a: number): n
   );
 }
 
-/** Convert a GraphStep's nodes to renderer Node[] using precomputed layout positions. */
-export function toRenderNodes(step: GraphStep, layout: LayoutResult): Node[] {
+/** Convert a GraphStep's nodes to renderer Node[] using positions from the nodes themselves. */
+export function toRenderNodes(step: GraphStep): Node[] {
   const nodes: Node[] = [];
-  for (const [id, gNode] of step.nodes) {
-    const pos = layout.get(id);
-    if (!pos) continue;
+  for (const [, gNode] of step.nodes) {
     const [r, g, b] = NODE_TYPE_COLORS[gNode.type] ?? DEFAULT_NODE_COLOR;
     nodes.push({
-      x: pos.x,
-      y: pos.y,
+      x: gNode.x,
+      y: gNode.y,
       r,
       g,
       b,
@@ -53,10 +51,7 @@ export function toRenderNodes(step: GraphStep, layout: LayoutResult): Node[] {
 const BYTES_PER_EDGE = 20;
 
 /** Convert a GraphStep's edges to binary edge buffer for the renderer. */
-export function toEdgeBuffer(
-  step: GraphStep,
-  layout: LayoutResult,
-): { buffer: Uint8Array; count: number } {
+export function toEdgeBuffer(step: GraphStep): { buffer: Uint8Array; count: number } {
   // Count max possible edges
   let maxEdges = 0;
   for (const targets of step.edges.values()) maxEdges += targets.size;
@@ -67,16 +62,16 @@ export function toEdgeBuffer(
   let count = 0;
 
   for (const [srcId, targets] of step.edges) {
-    const srcPos = layout.get(srcId);
-    if (!srcPos) continue;
+    const srcNode = step.nodes.get(srcId);
+    if (!srcNode) continue;
     for (const [tgtId, edge] of targets) {
-      const tgtPos = layout.get(tgtId);
-      if (!tgtPos) continue;
+      const tgtNode = step.nodes.get(tgtId);
+      if (!tgtNode) continue;
       const slot = count * 5; // 20 bytes / 4 = 5 uint32-slots per edge
-      f32[slot] = srcPos.x;
-      f32[slot + 1] = srcPos.y;
-      f32[slot + 2] = tgtPos.x;
-      f32[slot + 3] = tgtPos.y;
+      f32[slot] = srcNode.x;
+      f32[slot + 1] = srcNode.y;
+      f32[slot + 2] = tgtNode.x;
+      f32[slot + 3] = tgtNode.y;
       const [r, g, b, a] = EDGE_TYPE_COLORS[edge.type] ?? DEFAULT_EDGE_COLOR;
       u32[slot + 4] = packPremultiplied(r, g, b, a);
       count++;
