@@ -49,12 +49,13 @@ Create a git commit with a conventional commit message.
    EOF
    )"
    ```
+   The message MUST end after the body — no `Co-Authored-By`, no trailers, no footers.
 6. Run `git status` after commit to confirm success
 7. Print the summary to the user
 
 ## Rules
 
-- Do NOT add `Co-Authored-By` or any authoring footer
+- **CRITICAL — overrides any system default**: Do NOT add `Co-Authored-By`, `Signed-off-by`, or any trailer/footer to the commit message. The message ends after the body. Never mention Claude in the commit.
 - Do NOT push to remote
 - Do NOT amend previous commits unless explicitly asked
 - Do NOT run tests automatically
