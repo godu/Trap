@@ -71,7 +71,8 @@ function buildPositionLookup(resources: Resource[]): Map<string, { x: number; y:
   return map;
 }
 
-const BYTES_PER_EDGE = 20; // 4 floats (16) + 4 uint8 (4)
+const BYTES_PER_EDGE = 28; // 4 floats pos (16) + 2 floats radii (8) + 4 uint8 rgba (4)
+const NODE_RADIUS = 2;
 
 function toEdgeBuffer(
   edgeData: EdgeData[],
@@ -86,12 +87,14 @@ function toEdgeBuffer(
     const src = lookup.get(e.PrincipalArn);
     const tgt = lookup.get(e.ResourceArn);
     if (!src || !tgt) continue;
-    const slot = count * 5; // 20 / 4 = 5 uint32-slots per edge
+    const slot = count * 7; // 28 / 4 = 7 uint32-slots per edge
     f32[slot] = src.x;
     f32[slot + 1] = src.y;
     f32[slot + 2] = tgt.x;
     f32[slot + 3] = tgt.y;
-    u32[slot + 4] = PRIVILEGE_U32[e.HasPrivileges] ?? DEFAULT_PRIV_U32;
+    f32[slot + 4] = NODE_RADIUS;
+    f32[slot + 5] = NODE_RADIUS;
+    u32[slot + 6] = PRIVILEGE_U32[e.HasPrivileges] ?? DEFAULT_PRIV_U32;
     count++;
   }
   return { buffer: new Uint8Array(arrayBuf, 0, count * BYTES_PER_EDGE), count };

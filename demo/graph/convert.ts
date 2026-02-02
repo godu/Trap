@@ -48,7 +48,7 @@ export function toRenderNodes(step: GraphStep): Node[] {
   return nodes;
 }
 
-const BYTES_PER_EDGE = 20;
+const BYTES_PER_EDGE = 28;
 
 /** Convert a GraphStep's edges to binary edge buffer for the renderer. */
 export function toEdgeBuffer(step: GraphStep): { buffer: Uint8Array; count: number } {
@@ -67,13 +67,15 @@ export function toEdgeBuffer(step: GraphStep): { buffer: Uint8Array; count: numb
     for (const [tgtId, edge] of targets) {
       const tgtNode = step.nodes.get(tgtId);
       if (!tgtNode) continue;
-      const slot = count * 5; // 20 bytes / 4 = 5 uint32-slots per edge
+      const slot = count * 7; // 28 bytes / 4 = 7 uint32-slots per edge
       f32[slot] = srcNode.x;
       f32[slot + 1] = srcNode.y;
       f32[slot + 2] = tgtNode.x;
       f32[slot + 3] = tgtNode.y;
+      f32[slot + 4] = srcNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS;
+      f32[slot + 5] = tgtNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS;
       const [r, g, b, a] = EDGE_TYPE_COLORS[edge.type] ?? DEFAULT_EDGE_COLOR;
-      u32[slot + 4] = packPremultiplied(r, g, b, a);
+      u32[slot + 6] = packPremultiplied(r, g, b, a);
       count++;
     }
   }
