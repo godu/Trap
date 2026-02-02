@@ -1,5 +1,11 @@
 import type { Node, RendererOptions } from "./types";
-import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource, edgeLineVertexSource } from "./shaders";
+import {
+  vertexSource,
+  fragmentSource,
+  edgeVertexSource,
+  edgeFragmentSource,
+  edgeLineVertexSource,
+} from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
