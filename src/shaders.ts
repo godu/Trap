@@ -27,9 +27,8 @@ in vec2 v_uv;
 out vec4 outColor;
 
 void main() {
-  float dist = length(v_uv);
-  if (dist > 1.0) discard;
-  float alpha = 1.0 - smoothstep(0.9, 1.0, dist);
+  float dist = dot(v_uv, v_uv);
+  float alpha = 1.0 - smoothstep(0.81, 1.0, dist);
   outColor = vec4(v_color * alpha, alpha);
 }
 `;

@@ -614,18 +614,14 @@ export class Renderer {
       return;
     }
 
-    this.animFrom = {
-      centerX: this.centerX,
-      centerY: this.centerY,
-      halfW: this.halfW,
-      halfH: this.halfH,
-    };
-    this.animTo = {
-      centerX: view.centerX,
-      centerY: view.centerY,
-      halfW: view.halfW,
-      halfH: view.halfH,
-    };
+    this.animFrom.centerX = this.centerX;
+    this.animFrom.centerY = this.centerY;
+    this.animFrom.halfW = this.halfW;
+    this.animFrom.halfH = this.halfH;
+    this.animTo.centerX = view.centerX;
+    this.animTo.centerY = view.centerY;
+    this.animTo.halfW = view.halfW;
+    this.animTo.halfH = view.halfH;
     this.animDuration = duration;
     this.animStartTime = performance.now();
 
@@ -688,11 +684,17 @@ export class Renderer {
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     this.updateProjection();
-    const { projScaleX, projScaleY, projOffsetX, projOffsetY } = this;
+    const projScaleX = this.projScaleX;
+    const projScaleY = this.projScaleY;
+    const projOffsetX = this.projOffsetX;
+    const projOffsetY = this.projOffsetY;
 
     // Draw edges behind nodes (LOD: lines when zoomed out, arrows when close)
     if (this.edgeCount > 0) {
-      const { vpMinX, vpMinY, vpMaxX, vpMaxY } = this;
+      const vpMinX = this.vpMinX;
+      const vpMinY = this.vpMinY;
+      const vpMaxX = this.vpMaxX;
+      const vpMaxY = this.vpMaxY;
       // LOD: when node radius (2 world units) < 3px, arrow detail is sub-pixel → use lines
       if (Math.abs(projScaleX) * this.canvas.width < 3.0) {
         gl.useProgram(this.edgeLineProgram);
