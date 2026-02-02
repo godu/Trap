@@ -51,12 +51,6 @@ function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 }
 
-function touchDistance(a: Touch, b: Touch): number {
-  const dx = a.clientX - b.clientX;
-  const dy = a.clientY - b.clientY;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
@@ -111,6 +105,28 @@ export class Renderer {
   private projOffsetX = 0;
   private projOffsetY = 0;
 
+  // Last-sent uniform values to skip redundant gl.uniform* calls
+  private sentNodeScaleX = NaN;
+  private sentNodeScaleY = NaN;
+  private sentNodeOffsetX = NaN;
+  private sentNodeOffsetY = NaN;
+  private sentEdgeScaleX = NaN;
+  private sentEdgeScaleY = NaN;
+  private sentEdgeOffsetX = NaN;
+  private sentEdgeOffsetY = NaN;
+  private sentEdgeVpMinX = NaN;
+  private sentEdgeVpMinY = NaN;
+  private sentEdgeVpMaxX = NaN;
+  private sentEdgeVpMaxY = NaN;
+  private sentLineScaleX = NaN;
+  private sentLineScaleY = NaN;
+  private sentLineOffsetX = NaN;
+  private sentLineOffsetY = NaN;
+  private sentLineVpMinX = NaN;
+  private sentLineVpMinY = NaN;
+  private sentLineVpMaxX = NaN;
+  private sentLineVpMaxY = NaN;
+
   // Render throttling
   private renderPending = false;
 
@@ -128,7 +144,12 @@ export class Renderer {
   private isDragging = false;
   private lastMouseX = 0;
   private lastMouseY = 0;
-  private lastTouches: Touch[] | null = null;
+  // Pre-allocated touch coordinate storage (avoids Array.from per event)
+  private touchCount = 0;
+  private touch0X = 0;
+  private touch0Y = 0;
+  private touch1X = 0;
+  private touch1Y = 0;
   private abortController = new AbortController();
 
   constructor(options: RendererOptions) {
@@ -250,8 +271,8 @@ export class Renderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Single interleaved instance buffer
-    // Per node: [x, y, r, g, b, radius] = 6 floats = 24 bytes
-    const NODE_STRIDE = 6 * 4;
+    // Per node: [x(f32), y(f32), rgba(4×u8), radius(f32)] = 16 bytes
+    const NODE_STRIDE = 16;
     const instanceBuf = gl.createBuffer();
     if (!instanceBuf) throw new Error("Failed to create buffer");
     this.nodeInstanceBuffer = instanceBuf;
@@ -262,14 +283,14 @@ export class Renderer {
     gl.vertexAttribPointer(1, 2, gl.FLOAT, false, NODE_STRIDE, 0);
     gl.vertexAttribDivisor(1, 1);
 
-    // a_color (vec3) at byte offset 8
+    // a_color (vec4 normalized u8) at byte offset 8
     gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, NODE_STRIDE, 8);
+    gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, NODE_STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
-    // a_radius (float) at byte offset 20
+    // a_radius (float) at byte offset 12
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, NODE_STRIDE, 20);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, NODE_STRIDE, 12);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
@@ -279,18 +300,24 @@ export class Renderer {
   }
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
-    const data = new Float32Array(nodes.length * 6);
+    // 16 bytes per node = 4 floats worth of space
+    const buf = new ArrayBuffer(nodes.length * 16);
+    const f32 = new Float32Array(buf);
+    const u8 = new Uint8Array(buf);
     for (let i = 0; i < nodes.length; i++) {
-      const off = i * 6;
-      data[off] = nodes[i].x;
-      data[off + 1] = nodes[i].y;
-      data[off + 2] = nodes[i].r;
-      data[off + 3] = nodes[i].g;
-      data[off + 4] = nodes[i].b;
-      data[off + 5] = nodes[i].radius;
+      const fi = i * 4; // float index (16 bytes / 4)
+      const bi = i * 16; // byte index
+      f32[fi] = nodes[i].x;
+      f32[fi + 1] = nodes[i].y;
+      // Pack RGB as normalized u8 at byte offset 8
+      u8[bi + 8] = (nodes[i].r * 255 + 0.5) | 0;
+      u8[bi + 9] = (nodes[i].g * 255 + 0.5) | 0;
+      u8[bi + 10] = (nodes[i].b * 255 + 0.5) | 0;
+      u8[bi + 11] = 255; // alpha
+      f32[fi + 3] = nodes[i].radius;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
   }
 
   private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
@@ -463,7 +490,7 @@ export class Renderer {
       "touchstart",
       (e) => {
         e.preventDefault();
-        this.lastTouches = Array.from(e.touches);
+        this.storeTouches(e.touches);
       },
       { signal, passive: false },
     );
@@ -472,26 +499,31 @@ export class Renderer {
       "touchmove",
       (e) => {
         e.preventDefault();
-        if (!this.lastTouches) return;
+        if (this.touchCount === 0) return;
 
-        const touches = Array.from(e.touches);
+        const touches = e.touches;
+        const prevCount = this.touchCount;
 
-        if (touches.length === 1 && this.lastTouches.length === 1) {
+        if (touches.length === 1 && prevCount === 1) {
           // Single finger pan
-          const dx = touches[0].clientX - this.lastTouches[0].clientX;
-          const dy = touches[0].clientY - this.lastTouches[0].clientY;
+          const dx = touches[0].clientX - this.touch0X;
+          const dy = touches[0].clientY - this.touch0Y;
           this.pan(dx, dy);
-        } else if (touches.length >= 2 && this.lastTouches.length >= 2) {
+        } else if (touches.length >= 2 && prevCount >= 2) {
           // Pinch zoom + pan
-          const oldDist = touchDistance(this.lastTouches[0], this.lastTouches[1]);
-          const newDist = touchDistance(touches[0], touches[1]);
+          const odx = this.touch0X - this.touch1X;
+          const ody = this.touch0Y - this.touch1Y;
+          const oldDist = Math.sqrt(odx * odx + ody * ody);
+          const ndx = touches[0].clientX - touches[1].clientX;
+          const ndy = touches[0].clientY - touches[1].clientY;
+          const newDist = Math.sqrt(ndx * ndx + ndy * ndy);
           const factor = oldDist / newDist;
           const midX = (touches[0].clientX + touches[1].clientX) / 2;
           const midY = (touches[0].clientY + touches[1].clientY) / 2;
           this.zoomAt(midX, midY, factor);
         }
 
-        this.lastTouches = touches;
+        this.storeTouches(touches);
       },
       { signal, passive: false },
     );
@@ -499,14 +531,22 @@ export class Renderer {
     canvas.addEventListener(
       "touchend",
       (e) => {
-        if (e.touches.length === 0) {
-          this.lastTouches = null;
-        } else {
-          this.lastTouches = Array.from(e.touches);
-        }
+        this.storeTouches(e.touches);
       },
       { signal },
     );
+  }
+
+  private storeTouches(touches: TouchList): void {
+    this.touchCount = touches.length;
+    if (touches.length >= 1) {
+      this.touch0X = touches[0].clientX;
+      this.touch0Y = touches[0].clientY;
+    }
+    if (touches.length >= 2) {
+      this.touch1X = touches[1].clientX;
+      this.touch1Y = touches[1].clientY;
+    }
   }
 
   private getRect(): DOMRect {
@@ -656,16 +696,60 @@ export class Renderer {
       // LOD: when node radius (2 world units) < 3px, arrow detail is sub-pixel → use lines
       if (Math.abs(projScaleX) * this.canvas.width < 3.0) {
         gl.useProgram(this.edgeLineProgram);
-        gl.uniform2f(this.edgeLineScaleLocation, projScaleX, projScaleY);
-        gl.uniform2f(this.edgeLineOffsetLocation, projOffsetX, projOffsetY);
-        gl.uniform4f(this.edgeLineViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+        if (
+          projScaleX !== this.sentLineScaleX ||
+          projScaleY !== this.sentLineScaleY ||
+          projOffsetX !== this.sentLineOffsetX ||
+          projOffsetY !== this.sentLineOffsetY
+        ) {
+          gl.uniform2f(this.edgeLineScaleLocation, projScaleX, projScaleY);
+          gl.uniform2f(this.edgeLineOffsetLocation, projOffsetX, projOffsetY);
+          this.sentLineScaleX = projScaleX;
+          this.sentLineScaleY = projScaleY;
+          this.sentLineOffsetX = projOffsetX;
+          this.sentLineOffsetY = projOffsetY;
+        }
+        if (
+          vpMinX !== this.sentLineVpMinX ||
+          vpMinY !== this.sentLineVpMinY ||
+          vpMaxX !== this.sentLineVpMaxX ||
+          vpMaxY !== this.sentLineVpMaxY
+        ) {
+          gl.uniform4f(this.edgeLineViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+          this.sentLineVpMinX = vpMinX;
+          this.sentLineVpMinY = vpMinY;
+          this.sentLineVpMaxX = vpMaxX;
+          this.sentLineVpMaxY = vpMaxY;
+        }
         gl.bindVertexArray(this.edgeLineVao);
         gl.drawArraysInstanced(gl.LINES, 0, 2, this.edgeCount);
       } else {
         gl.useProgram(this.edgeProgram);
-        gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
-        gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
-        gl.uniform4f(this.edgeViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+        if (
+          projScaleX !== this.sentEdgeScaleX ||
+          projScaleY !== this.sentEdgeScaleY ||
+          projOffsetX !== this.sentEdgeOffsetX ||
+          projOffsetY !== this.sentEdgeOffsetY
+        ) {
+          gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
+          gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
+          this.sentEdgeScaleX = projScaleX;
+          this.sentEdgeScaleY = projScaleY;
+          this.sentEdgeOffsetX = projOffsetX;
+          this.sentEdgeOffsetY = projOffsetY;
+        }
+        if (
+          vpMinX !== this.sentEdgeVpMinX ||
+          vpMinY !== this.sentEdgeVpMinY ||
+          vpMaxX !== this.sentEdgeVpMaxX ||
+          vpMaxY !== this.sentEdgeVpMaxY
+        ) {
+          gl.uniform4f(this.edgeViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+          this.sentEdgeVpMinX = vpMinX;
+          this.sentEdgeVpMinY = vpMinY;
+          this.sentEdgeVpMaxX = vpMaxX;
+          this.sentEdgeVpMaxY = vpMaxY;
+        }
         gl.bindVertexArray(this.edgeVao);
         gl.drawElementsInstanced(gl.TRIANGLES, 9, gl.UNSIGNED_BYTE, 0, this.edgeCount);
       }
@@ -673,8 +757,19 @@ export class Renderer {
 
     // Draw nodes on top
     gl.useProgram(this.program);
-    gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
-    gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
+    if (
+      projScaleX !== this.sentNodeScaleX ||
+      projScaleY !== this.sentNodeScaleY ||
+      projOffsetX !== this.sentNodeOffsetX ||
+      projOffsetY !== this.sentNodeOffsetY
+    ) {
+      gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
+      gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
+      this.sentNodeScaleX = projScaleX;
+      this.sentNodeScaleY = projScaleY;
+      this.sentNodeOffsetX = projOffsetX;
+      this.sentNodeOffsetY = projOffsetY;
+    }
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
