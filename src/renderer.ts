@@ -1514,25 +1514,7 @@ export class Renderer {
     const projOffsetX = this.projOffsetX;
     const projOffsetY = this.projOffsetY;
 
-    // Draw nodes (behind edges)
-    gl.useProgram(this.program);
-    if (
-      projScaleX !== this.sentNodeScaleX ||
-      projScaleY !== this.sentNodeScaleY ||
-      projOffsetX !== this.sentNodeOffsetX ||
-      projOffsetY !== this.sentNodeOffsetY
-    ) {
-      gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
-      gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
-      this.sentNodeScaleX = projScaleX;
-      this.sentNodeScaleY = projScaleY;
-      this.sentNodeOffsetX = projOffsetX;
-      this.sentNodeOffsetY = projOffsetY;
-    }
-    gl.bindVertexArray(this.vao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
-
-    // Draw edges on top of nodes (LOD: lines when zoomed out, arrows when close)
+    // Draw edges behind nodes (LOD: lines when zoomed out, arrows when close)
     // Cap instance count to limit fragment overdraw on high-DPI displays.
     // The edge buffer is shuffled at upload time so any prefix has uniform spatial coverage.
     const MAX_DRAW_EDGES = 65536;
@@ -1603,6 +1585,24 @@ export class Renderer {
         gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
       }
     }
+
+    // Draw nodes on top of edges
+    gl.useProgram(this.program);
+    if (
+      projScaleX !== this.sentNodeScaleX ||
+      projScaleY !== this.sentNodeScaleY ||
+      projOffsetX !== this.sentNodeOffsetX ||
+      projOffsetY !== this.sentNodeOffsetY
+    ) {
+      gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
+      gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
+      this.sentNodeScaleX = projScaleX;
+      this.sentNodeScaleY = projScaleY;
+      this.sentNodeOffsetX = projOffsetX;
+      this.sentNodeOffsetY = projOffsetY;
+    }
+    gl.bindVertexArray(this.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
 
   destroy(): void {
