@@ -287,6 +287,10 @@ export class Renderer {
   private nodeF32: Float32Array | null = null;
   private nodeU8: Uint8Array | null = null;
 
+  // GPU buffer byte sizes (for bufferSubData optimization)
+  private nodeGpuBytes = 0;
+  private edgeGpuBytes = 0;
+
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
   private edgeBufferCapacity = 0;
   private edgeArrayBuf: ArrayBuffer | null = null;
@@ -385,6 +389,7 @@ export class Renderer {
       this.edgeCount = options.edgeCount;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, options.edgeBuffer, gl.STATIC_DRAW);
+      this.edgeGpuBytes = options.edgeCount * EDGE_STRIDE;
     }
 
     // Support new object edge API
@@ -518,6 +523,7 @@ export class Renderer {
     const byteLen = sorted.length * 16;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
+    this.nodeGpuBytes = byteLen;
   }
 
   private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
@@ -708,6 +714,7 @@ export class Renderer {
       const gl = this.gl;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
+      this.edgeGpuBytes = shuffled.byteLength;
     }
   }
 
@@ -738,6 +745,7 @@ export class Renderer {
       const shuffled = shuffleEdgeBuffer(src, edgeCount);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
+      this.edgeGpuBytes = shuffled.byteLength;
     }
     this.requestRender();
   }
@@ -781,6 +789,7 @@ export class Renderer {
         const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
         this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
+        this.edgeGpuBytes = shuffled.byteLength;
       }
     }
 
@@ -831,6 +840,7 @@ export class Renderer {
             const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
             this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
+            this.edgeGpuBytes = shuffled.byteLength;
           }
         }
         this.oldNodes = [];
@@ -887,9 +897,15 @@ export class Renderer {
     }
 
     const byteLen = target.length * 16;
+    const view = new Uint8Array(this.nodeArrayBuf!, 0, byteLen);
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
+    if (byteLen === this.nodeGpuBytes) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, view);
+    } else {
+      gl.bufferData(gl.ARRAY_BUFFER, view, gl.DYNAMIC_DRAW);
+      this.nodeGpuBytes = byteLen;
+    }
     this.nodeCount = target.length;
   }
 
@@ -953,9 +969,15 @@ export class Renderer {
     if (count > 0) {
       // Skip shuffle during animation frames for performance
       const byteLen = count * EDGE_STRIDE;
+      const view = this.edgeBufU8!.subarray(0, byteLen);
       const gl = this.gl;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, this.edgeBufU8!.subarray(0, byteLen), gl.DYNAMIC_DRAW);
+      if (byteLen === this.edgeGpuBytes) {
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, view);
+      } else {
+        gl.bufferData(gl.ARRAY_BUFFER, view, gl.DYNAMIC_DRAW);
+        this.edgeGpuBytes = byteLen;
+      }
     }
   }
 
