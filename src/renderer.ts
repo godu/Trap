@@ -301,6 +301,10 @@ export class Renderer {
   private nodeGpuBytes = 0;
   private edgeGpuBytes = 0;
 
+  // Reusable Map + object pool for interpolateEdges
+  private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
+  private interpNodePool: { x: number; y: number; radius: number }[] = [];
+
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
   private edgeBufferCapacity = 0;
   private edgeArrayBuf: ArrayBuffer | null = null;
@@ -925,18 +929,31 @@ export class Renderer {
 
     // Build interpolated node positions for resolving edge endpoints
     const targetNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
-    const interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
+    const interpNodeMap = this.interpNodeMap;
+    interpNodeMap.clear();
+    const pool = this.interpNodePool;
+    let poolIdx = 0;
     for (const node of targetNodes) {
+      // Grow pool on demand, reuse existing objects
+      let obj: { x: number; y: number; radius: number };
+      if (poolIdx < pool.length) {
+        obj = pool[poolIdx];
+      } else {
+        obj = { x: 0, y: 0, radius: 0 };
+        pool.push(obj);
+      }
+      poolIdx++;
       const old = this.oldNodeMap.get(node.id);
       if (old) {
-        interpNodeMap.set(node.id, {
-          x: lerp(old.x, node.x, t),
-          y: lerp(old.y, node.y, t),
-          radius: lerp(old.radius, node.radius, t),
-        });
+        obj.x = lerp(old.x, node.x, t);
+        obj.y = lerp(old.y, node.y, t);
+        obj.radius = lerp(old.radius, node.radius, t);
       } else {
-        interpNodeMap.set(node.id, { x: node.x, y: node.y, radius: node.radius });
+        obj.x = node.x;
+        obj.y = node.y;
+        obj.radius = node.radius;
       }
+      interpNodeMap.set(node.id, obj);
     }
 
     this.ensureEdgeBuffer(target.length);
