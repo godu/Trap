@@ -1,4 +1,4 @@
-import type { Node } from "../../src/types";
+import type { Node, Edge } from "../../src/types";
 import type { GraphStep } from "./types";
 
 const NODE_TYPE_COLORS: Record<string, [number, number, number]> = {
@@ -21,64 +21,46 @@ const DEFAULT_EDGE_COLOR: [number, number, number, number] = [0.5, 0.5, 0.5, 0.3
 const DEFAULT_RADIUS = 2.0;
 const SELECTED_RADIUS = 3.0;
 
-/** Pack premultiplied RGBA into a uint32 (little-endian: R | G<<8 | B<<16 | A<<24) */
-export function packPremultiplied(r: number, g: number, b: number, a: number): number {
-  return (
-    ((r * a * 255 + 0.5) | 0) |
-    (((g * a * 255 + 0.5) | 0) << 8) |
-    (((b * a * 255 + 0.5) | 0) << 16) |
-    (((a * 255 + 0.5) | 0) << 24)
-  );
-}
-
-/** Convert a GraphStep's nodes to renderer Node[] using positions from the nodes themselves. */
+/** Convert a GraphStep's nodes to renderer Node[] with ids. */
 export function toRenderNodes(step: GraphStep): Node[] {
   const nodes: Node[] = [];
-  for (const [, gNode] of step.nodes) {
+  for (const [id, gNode] of step.nodes) {
     const [r, g, b] = NODE_TYPE_COLORS[gNode.type] ?? DEFAULT_NODE_COLOR;
     nodes.push({
+      id,
       x: gNode.x,
       y: gNode.y,
       r,
       g,
       b,
       radius: gNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS,
+      opacity: 1.0,
     });
   }
   return nodes;
 }
 
-const BYTES_PER_EDGE = 28;
-
-/** Convert a GraphStep's edges to binary edge buffer for the renderer. */
-export function toEdgeBuffer(step: GraphStep): { buffer: Uint8Array; count: number } {
-  // Count max possible edges
-  let maxEdges = 0;
-  for (const targets of step.edges.values()) maxEdges += targets.size;
-
-  const arrayBuf = new ArrayBuffer(maxEdges * BYTES_PER_EDGE);
-  const f32 = new Float32Array(arrayBuf);
-  const u32 = new Uint32Array(arrayBuf);
-  let count = 0;
+/** Convert a GraphStep's edges to Edge object array for the renderer. */
+export function toEdges(step: GraphStep): Edge[] {
+  const edges: Edge[] = [];
 
   for (const [srcId, targets] of step.edges) {
-    const srcNode = step.nodes.get(srcId);
-    if (!srcNode) continue;
+    if (!step.nodes.has(srcId)) continue;
     for (const [tgtId, edge] of targets) {
-      const tgtNode = step.nodes.get(tgtId);
-      if (!tgtNode) continue;
-      const slot = count * 7; // 28 bytes / 4 = 7 uint32-slots per edge
-      f32[slot] = srcNode.x;
-      f32[slot + 1] = srcNode.y;
-      f32[slot + 2] = tgtNode.x;
-      f32[slot + 3] = tgtNode.y;
-      f32[slot + 4] = srcNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS;
-      f32[slot + 5] = tgtNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS;
+      if (!step.nodes.has(tgtId)) continue;
       const [r, g, b, a] = EDGE_TYPE_COLORS[edge.type] ?? DEFAULT_EDGE_COLOR;
-      u32[slot + 6] = packPremultiplied(r, g, b, a);
-      count++;
+      edges.push({
+        id: `${srcId}->${tgtId}`,
+        source: srcId,
+        target: tgtId,
+        r,
+        g,
+        b,
+        a,
+        zIndex: edge.type === "escalation" ? 1 : 0,
+      });
     }
   }
 
-  return { buffer: new Uint8Array(arrayBuf, 0, count * BYTES_PER_EDGE), count };
+  return edges;
 }
