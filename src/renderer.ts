@@ -71,7 +71,7 @@ export class Renderer {
   private edgeScaleLocation: WebGLUniformLocation;
   private edgeOffsetLocation: WebGLUniformLocation;
   private edgeHeadLenLocation: WebGLUniformLocation;
-  private edgeNodeRadiusLocation: WebGLUniformLocation;
+  private edgeCurvatureLocation: WebGLUniformLocation;
   private edgeViewportLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
 
@@ -193,9 +193,9 @@ export class Renderer {
     if (!eHeadLoc) throw new Error("u_headLength not found");
     this.edgeHeadLenLocation = eHeadLoc;
 
-    const eRadLoc = gl.getUniformLocation(this.edgeProgram, "u_nodeRadius");
-    if (!eRadLoc) throw new Error("u_nodeRadius not found");
-    this.edgeNodeRadiusLocation = eRadLoc;
+    const eCurveLoc = gl.getUniformLocation(this.edgeProgram, "u_curvature");
+    if (!eCurveLoc) throw new Error("u_curvature not found");
+    this.edgeCurvatureLocation = eCurveLoc;
 
     const eVpLoc = gl.getUniformLocation(this.edgeProgram, "u_viewport");
     if (!eVpLoc) throw new Error("u_viewport not found");
@@ -217,7 +217,7 @@ export class Renderer {
     // Set constant edge uniforms once
     gl.useProgram(this.edgeProgram);
     gl.uniform1f(this.edgeHeadLenLocation, 1.5);
-    gl.uniform1f(this.edgeNodeRadiusLocation, 2.0);
+    gl.uniform1f(this.edgeCurvatureLocation, 0.4);
 
     if (options.edgeBuffer && options.edgeCount && options.edgeCount > 0) {
       this.edgeCount = options.edgeCount;
@@ -327,20 +327,24 @@ export class Renderer {
     if (!vao) throw new Error("Failed to create edge VAO");
     gl.bindVertexArray(vao);
 
-    // Arrow template: 7 unique vertices, indexed as 3 triangles (shaft quad + head)
+    // Curved arrow template: segmented shaft (8 segments) + arrowhead triangle
     // Each vertex: (tParam, perpOffset, flag)
     const SHAFT_HW = 0.2;
     const HEAD_HW = 0.7;
-    // prettier-ignore
-    const template = new Float32Array([
-      0, -SHAFT_HW, 0,   // 0: shaft bottom-left
-      1, -SHAFT_HW, 0,   // 1: shaft bottom-right
-      1,  SHAFT_HW, 0,   // 2: shaft top-right
-      0,  SHAFT_HW, 0,   // 3: shaft top-left
-      0, -HEAD_HW,  1,   // 4: head bottom
-      0,  0,        2,   // 5: head tip
-      0,  HEAD_HW,  1,   // 6: head top
-    ]);
+    const SEGMENTS = 8;
+
+    // 9 positions × 2 sides = 18 shaft vertices + 3 head vertices = 21 total
+    const template = new Float32Array((SEGMENTS + 1) * 2 * 3 + 3 * 3);
+    let vi = 0;
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const t = i / SEGMENTS;
+      template[vi++] = t; template[vi++] = -SHAFT_HW; template[vi++] = 0;
+      template[vi++] = t; template[vi++] =  SHAFT_HW; template[vi++] = 0;
+    }
+    // Head vertices (indices 18, 19, 20)
+    template[vi++] = 0; template[vi++] = -HEAD_HW; template[vi++] = 1;
+    template[vi++] = 0; template[vi++] =  0;       template[vi++] = 2;
+    template[vi++] = 0; template[vi++] =  HEAD_HW; template[vi++] = 1;
 
     const templateBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, templateBuf);
@@ -348,20 +352,25 @@ export class Renderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
-    // Index buffer for 3 triangles (reuses shared shaft vertices)
-    // prettier-ignore
-    const indices = new Uint8Array([
-      0, 1, 2,   // shaft triangle 1
-      0, 2, 3,   // shaft triangle 2
-      4, 5, 6,   // head triangle
-    ]);
+    // Index buffer: 8 shaft quads (16 triangles) + 1 head triangle = 51 indices
+    const headBase = (SEGMENTS + 1) * 2;
+    const indices = new Uint8Array(SEGMENTS * 6 + 3);
+    let ii = 0;
+    for (let i = 0; i < SEGMENTS; i++) {
+      const b = i * 2;
+      indices[ii++] = b;     indices[ii++] = b + 2; indices[ii++] = b + 3;
+      indices[ii++] = b;     indices[ii++] = b + 3; indices[ii++] = b + 1;
+    }
+    indices[ii++] = headBase;     // head bottom
+    indices[ii++] = headBase + 1; // head tip
+    indices[ii++] = headBase + 2; // head top
     const indexBuf = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuf);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Single interleaved instance buffer
-    // Per edge: [srcX(f32), srcY(f32), tgtX(f32), tgtY(f32), RGBA(4×u8)] = 20 bytes
-    const STRIDE = 20;
+    // Per edge: [srcXY(2×f32), tgtXY(2×f32), srcRadius(f32), tgtRadius(f32), RGBA(4×u8)] = 28 bytes
+    const STRIDE = 28;
     const buf = gl.createBuffer();
     if (!buf) throw new Error("Failed to create buffer");
     this.edgeInstanceBuffer = buf;
@@ -377,10 +386,15 @@ export class Renderer {
     gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
-    // a_color (vec4 normalized u8) at byte offset 16
+    // a_color (vec4 normalized u8) at byte offset 24
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 16);
+    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 24);
     gl.vertexAttribDivisor(3, 1);
+
+    // a_radii (vec2: srcRadius, tgtRadius) at byte offset 16
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, STRIDE, 16);
+    gl.vertexAttribDivisor(4, 1);
 
     gl.bindVertexArray(null);
     return vao;
@@ -399,8 +413,8 @@ export class Renderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 1, gl.FLOAT, false, 0, 0);
 
-    // Reuse existing edge instance buffer (same 20-byte stride layout)
-    const STRIDE = 20;
+    // Reuse existing edge instance buffer (same 28-byte stride layout)
+    const STRIDE = 28;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
 
     gl.enableVertexAttribArray(1);
@@ -412,7 +426,7 @@ export class Renderer {
     gl.vertexAttribDivisor(2, 1);
 
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 16);
+    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 24);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
@@ -423,7 +437,7 @@ export class Renderer {
     this.edgeCount = count;
     if (count > 0) {
       const gl = this.gl;
-      const BYTES_PER_EDGE = 20;
+      const BYTES_PER_EDGE = 28;
       const src = new Uint8Array(buffer.buffer, buffer.byteOffset, count * BYTES_PER_EDGE);
 
       // Fisher-Yates shuffle so any prefix is a spatially representative sample.
@@ -445,6 +459,14 @@ export class Renderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
     }
+    this.requestRender();
+  }
+
+  /** Set the curvature amount for edges (0 = straight, 0.2 = default curve). */
+  setCurvature(amount: number): void {
+    const gl = this.gl;
+    gl.useProgram(this.edgeProgram);
+    gl.uniform1f(this.edgeCurvatureLocation, amount);
     this.requestRender();
   }
 
@@ -778,7 +800,7 @@ export class Renderer {
           this.sentEdgeVpMaxY = vpMaxY;
         }
         gl.bindVertexArray(this.edgeVao);
-        gl.drawElementsInstanced(gl.TRIANGLES, 9, gl.UNSIGNED_BYTE, 0, drawEdges);
+        gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
       }
     }
 

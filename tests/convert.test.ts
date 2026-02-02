@@ -98,7 +98,7 @@ describe("toRenderNodes", () => {
 });
 
 describe("toEdgeBuffer", () => {
-  it("returns correct byte length (count * 20)", () => {
+  it("returns correct byte length (count * 28)", () => {
     const step = makeStep(
       [
         ["a", "aws:iam:role", 10, 20],
@@ -109,10 +109,10 @@ describe("toEdgeBuffer", () => {
     const { buffer, count } = toEdgeBuffer(step);
 
     expect(count).toBe(1);
-    expect(buffer.byteLength).toBe(20);
+    expect(buffer.byteLength).toBe(28);
   });
 
-  it("encodes positions correctly as Float32", () => {
+  it("encodes positions and radii correctly as Float32", () => {
     const step = makeStep(
       [
         ["a", "test", 10, 20],
@@ -122,11 +122,28 @@ describe("toEdgeBuffer", () => {
     );
     const { buffer } = toEdgeBuffer(step);
 
-    const f32 = new Float32Array(buffer.buffer, buffer.byteOffset, 4);
+    const f32 = new Float32Array(buffer.buffer, buffer.byteOffset, 6);
     expect(f32[0]).toBeCloseTo(10); // srcX
     expect(f32[1]).toBeCloseTo(20); // srcY
     expect(f32[2]).toBeCloseTo(30); // tgtX
     expect(f32[3]).toBeCloseTo(40); // tgtY
+    expect(f32[4]).toBeCloseTo(2.0); // srcRadius (default)
+    expect(f32[5]).toBeCloseTo(2.0); // tgtRadius (default)
+  });
+
+  it("encodes selected node radii", () => {
+    const step = makeStep(
+      [
+        ["a", "test", 0, 0, true],
+        ["b", "test", 1, 1],
+      ],
+      [["a", "b", "privilege"]],
+    );
+    const { buffer } = toEdgeBuffer(step);
+
+    const f32 = new Float32Array(buffer.buffer, buffer.byteOffset, 6);
+    expect(f32[4]).toBeCloseTo(3.0); // srcRadius (selected)
+    expect(f32[5]).toBeCloseTo(2.0); // tgtRadius (default)
   });
 
   it("packs RGBA correctly for privilege edges", () => {
@@ -139,10 +156,10 @@ describe("toEdgeBuffer", () => {
     );
     const { buffer } = toEdgeBuffer(step);
 
-    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 5);
+    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 7);
     const expected = packPremultiplied(0.3, 0.55, 0.75, 0.4);
     // packPremultiplied returns signed int32, Uint32Array stores unsigned
-    expect(u32[4]).toBe(expected >>> 0);
+    expect(u32[6]).toBe(expected >>> 0);
   });
 
   it("packs RGBA correctly for escalation edges", () => {
@@ -155,9 +172,9 @@ describe("toEdgeBuffer", () => {
     );
     const { buffer } = toEdgeBuffer(step);
 
-    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 5);
+    const u32 = new Uint32Array(buffer.buffer, buffer.byteOffset, 7);
     const expected = packPremultiplied(0.9, 0.25, 0.2, 0.6);
-    expect(u32[4]).toBe(expected >>> 0);
+    expect(u32[6]).toBe(expected >>> 0);
   });
 
   it("skips edges with missing source node", () => {
@@ -188,7 +205,7 @@ describe("toEdgeBuffer", () => {
     const { buffer, count } = toEdgeBuffer(step);
 
     expect(count).toBe(3);
-    expect(buffer.byteLength).toBe(60);
+    expect(buffer.byteLength).toBe(84);
   });
 });
 
