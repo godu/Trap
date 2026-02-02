@@ -20,7 +20,8 @@ export function computeBounds(nodes: Node[]): Bounds {
   let minY = Infinity;
   let maxY = -Infinity;
 
-  for (const node of nodes) {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
     const r = node.radius;
     if (node.x - r < minX) minX = node.x - r;
     if (node.x + r > maxX) maxX = node.x + r;
