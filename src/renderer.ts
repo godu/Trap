@@ -73,7 +73,14 @@ const EDGE_STRIDE = 32; // bytes per edge instance
 const CURVATURE = 0.4;
 const CLICK_THRESHOLD = 5; // px
 
-/** Evaluate quadratic Bezier at parameter t. */
+// Reusable result object for sampleBezier (avoids allocation per call)
+const bezierResult = { x: 0, y: 0 };
+
+/**
+ * Evaluate quadratic Bezier at parameter t.
+ * NOTE: Returns a shared object that is reused across calls — do not hold a
+ * reference across multiple invocations.
+ */
 export function sampleBezier(
   srcX: number,
   srcY: number,
@@ -85,7 +92,11 @@ export function sampleBezier(
   const dx = tgtX - srcX;
   const dy = tgtY - srcY;
   const len = Math.sqrt(dx * dx + dy * dy);
-  if (len < 0.0001) return { x: srcX, y: srcY };
+  if (len < 0.0001) {
+    bezierResult.x = srcX;
+    bezierResult.y = srcY;
+    return bezierResult;
+  }
   const fwdX = dx / len;
   const fwdY = dy / len;
   const rightX = -fwdY;
@@ -94,10 +105,9 @@ export function sampleBezier(
   const ctrlX = (srcX + tgtX) * 0.5 + rightX * curveDist;
   const ctrlY = (srcY + tgtY) * 0.5 + rightY * curveDist;
   const omt = 1 - t;
-  return {
-    x: omt * omt * srcX + 2 * t * omt * ctrlX + t * t * tgtX,
-    y: omt * omt * srcY + 2 * t * omt * ctrlY + t * t * tgtY,
-  };
+  bezierResult.x = omt * omt * srcX + 2 * t * omt * ctrlX + t * t * tgtX;
+  bezierResult.y = omt * omt * srcY + 2 * t * omt * ctrlY + t * t * tgtY;
+  return bezierResult;
 }
 
 /** Fisher-Yates shuffle of edge buffer within zIndex groups (EDGE_STRIDE bytes per record). */
