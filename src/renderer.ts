@@ -1,4 +1,4 @@
-import type { Node, RendererOptions } from "./types";
+import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent } from "./types";
 import {
   vertexSource,
   fragmentSource,
@@ -53,6 +53,93 @@ function easeInOutCubic(t: number): number {
   return 1 - (k * k * k) / 2;
 }
 
+function easeOutCubic(t: number): number {
+  const k = 1 - t;
+  return 1 - k * k * k;
+}
+
+/** Pack premultiplied RGBA into a uint32 (little-endian: R | G<<8 | B<<16 | A<<24) */
+function packPremultiplied(r: number, g: number, b: number, a: number): number {
+  return (
+    (r * a * 255 + 0.5) |
+    0 |
+    (((g * a * 255 + 0.5) | 0) << 8) |
+    (((b * a * 255 + 0.5) | 0) << 16) |
+    (((a * 255 + 0.5) | 0) << 24)
+  );
+}
+
+const EDGE_STRIDE = 32; // bytes per edge instance
+const CURVATURE = 0.4;
+const CLICK_THRESHOLD = 5; // px
+
+/** Evaluate quadratic Bezier at parameter t. */
+export function sampleBezier(
+  srcX: number,
+  srcY: number,
+  tgtX: number,
+  tgtY: number,
+  curvature: number,
+  t: number,
+): { x: number; y: number } {
+  const dx = tgtX - srcX;
+  const dy = tgtY - srcY;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.0001) return { x: srcX, y: srcY };
+  const fwdX = dx / len;
+  const fwdY = dy / len;
+  const rightX = -fwdY;
+  const rightY = fwdX;
+  const curveDist = len * curvature;
+  const ctrlX = (srcX + tgtX) * 0.5 + rightX * curveDist;
+  const ctrlY = (srcY + tgtY) * 0.5 + rightY * curveDist;
+  const omt = 1 - t;
+  return {
+    x: omt * omt * srcX + 2 * t * omt * ctrlX + t * t * tgtX,
+    y: omt * omt * srcY + 2 * t * omt * ctrlY + t * t * tgtY,
+  };
+}
+
+/** Fisher-Yates shuffle of edge buffer within zIndex groups (EDGE_STRIDE bytes per record). */
+function shuffleEdgeBuffer(buf: Uint8Array, count: number, groupSizes?: number[]): Uint8Array {
+  if (!groupSizes || groupSizes.length <= 1) {
+    const indices = new Uint32Array(count);
+    for (let i = 0; i < count; i++) indices[i] = i;
+    for (let i = count - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = tmp;
+    }
+    const shuffled = new Uint8Array(count * EDGE_STRIDE);
+    for (let i = 0; i < count; i++) {
+      const srcOff = indices[i] * EDGE_STRIDE;
+      shuffled.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), i * EDGE_STRIDE);
+    }
+    return shuffled;
+  }
+
+  // Shuffle within each zIndex group independently
+  const shuffled = new Uint8Array(count * EDGE_STRIDE);
+  let offset = 0;
+  for (const size of groupSizes) {
+    const indices = new Uint32Array(size);
+    for (let i = 0; i < size; i++) indices[i] = offset + i;
+    for (let i = size - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = indices[i];
+      indices[i] = indices[j];
+      indices[j] = tmp;
+    }
+    for (let i = 0; i < size; i++) {
+      const srcOff = indices[i] * EDGE_STRIDE;
+      shuffled.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), (offset + i) * EDGE_STRIDE);
+    }
+    offset += size;
+  }
+  return shuffled;
+}
+
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
@@ -63,6 +150,11 @@ export class Renderer {
   private offsetLocation: WebGLUniformLocation;
   private nodes: Node[];
   private nodeInstanceBuffer!: WebGLBuffer;
+
+  // Node/edge maps for object API
+  private nodeMap = new Map<string, Node>();
+  private edgeObjects: Edge[] = [];
+  private edgeMap = new Map<string, Edge>();
 
   // Edge rendering
   private edgeProgram: WebGLProgram;
@@ -94,12 +186,24 @@ export class Renderer {
   private vpMaxX = 0;
   private vpMaxY = 0;
 
-  // Animation state
+  // Camera animation state
   private animationId: number | null = null;
   private animStartTime = 0;
   private animDuration = 0;
   private animFrom = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
   private animTo = { centerX: 0, centerY: 0, halfW: 0, halfH: 0 };
+
+  // Data animation state
+  private dataAnimId: number | null = null;
+  private dataAnimStart = 0;
+  private dataAnimDuration = 300;
+  private dataAnimEasing: (t: number) => number = easeOutCubic;
+  private oldNodes: Node[] = [];
+  private oldNodeMap = new Map<string, Node>();
+  private targetNodes: Node[] = [];
+  private oldEdges: Edge[] = [];
+  private oldEdgeMap = new Map<string, Edge>();
+  private targetEdges: Edge[] = [];
 
   // Cached projection scalars (orthographic: pos * scale + offset)
   private projScaleX = 1;
@@ -146,6 +250,9 @@ export class Renderer {
   private isDragging = false;
   private lastMouseX = 0;
   private lastMouseY = 0;
+  private dragStartX = 0;
+  private dragStartY = 0;
+
   // Pre-allocated touch coordinate storage (avoids Array.from per event)
   private touchCount = 0;
   private touch0X = 0;
@@ -154,10 +261,47 @@ export class Renderer {
   private touch1Y = 0;
   private abortController = new AbortController();
 
+  // Event callbacks
+  private onNodeClick?: (e: NodeEvent) => void;
+  private onNodeDblClick?: (e: NodeEvent) => void;
+  private onNodeHoverEnter?: (e: NodeEvent) => void;
+  private onNodeHoverLeave?: (e: NodeEvent) => void;
+  private onEdgeClick?: (e: EdgeEvent) => void;
+  private onEdgeDblClick?: (e: EdgeEvent) => void;
+  private onEdgeHoverEnter?: (e: EdgeEvent) => void;
+  private onEdgeHoverLeave?: (e: EdgeEvent) => void;
+  private onBackgroundClick?: (e: BackgroundEvent) => void;
+  private onBackgroundDblClick?: (e: BackgroundEvent) => void;
+
+  // Hover state
+  private hoveredNodeId: string | null = null;
+  private hoveredEdgeId: string | null = null;
+
   constructor(options: RendererOptions) {
     this.canvas = options.canvas;
     this.nodes = options.nodes;
     this.nodeCount = options.nodes.length;
+    this.rebuildNodeMap(options.nodes);
+
+    // Store event callbacks
+    this.onNodeClick = options.onNodeClick;
+    this.onNodeDblClick = options.onNodeDblClick;
+    this.onNodeHoverEnter = options.onNodeHoverEnter;
+    this.onNodeHoverLeave = options.onNodeHoverLeave;
+    this.onEdgeClick = options.onEdgeClick;
+    this.onEdgeDblClick = options.onEdgeDblClick;
+    this.onEdgeHoverEnter = options.onEdgeHoverEnter;
+    this.onEdgeHoverLeave = options.onEdgeHoverLeave;
+    this.onBackgroundClick = options.onBackgroundClick;
+    this.onBackgroundDblClick = options.onBackgroundDblClick;
+
+    // Animation config
+    if (options.animationDuration !== undefined) {
+      this.dataAnimDuration = options.animationDuration;
+    }
+    if (options.animationEasing) {
+      this.dataAnimEasing = options.animationEasing;
+    }
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
@@ -217,12 +361,18 @@ export class Renderer {
     // Set constant edge uniforms once
     gl.useProgram(this.edgeProgram);
     gl.uniform1f(this.edgeHeadLenLocation, 1.5);
-    gl.uniform1f(this.edgeCurvatureLocation, 0.4);
+    gl.uniform1f(this.edgeCurvatureLocation, CURVATURE);
 
+    // Support legacy raw buffer API
     if (options.edgeBuffer && options.edgeCount && options.edgeCount > 0) {
       this.edgeCount = options.edgeCount;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, options.edgeBuffer, gl.STATIC_DRAW);
+    }
+
+    // Support new object edge API
+    if (options.edges && options.edges.length > 0) {
+      this.setEdgeObjects(options.edges, false);
     }
 
     gl.enable(gl.BLEND);
@@ -239,6 +389,13 @@ export class Renderer {
     this.resize();
     this.initCamera();
     this.setupInteraction();
+  }
+
+  private rebuildNodeMap(nodes: Node[]): void {
+    this.nodeMap.clear();
+    for (const node of nodes) {
+      this.nodeMap.set(node.id, node);
+    }
   }
 
   private initCamera(): void {
@@ -302,20 +459,22 @@ export class Renderer {
   }
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
-    // 16 bytes per node = 4 floats worth of space
-    const buf = new ArrayBuffer(nodes.length * 16);
+    // Sort by zIndex for draw ordering (lower zIndex draws first = behind)
+    const sorted = nodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const buf = new ArrayBuffer(sorted.length * 16);
     const f32 = new Float32Array(buf);
     const u8 = new Uint8Array(buf);
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
+    for (let i = 0; i < sorted.length; i++) {
+      const node = sorted[i];
       const fi = i * 4; // float index (16 bytes / 4)
       const bi = i * 16; // byte index
       f32[fi] = node.x;
       f32[fi + 1] = node.y;
+      const opacity = node.opacity ?? 1.0;
       u8[bi + 8] = (node.r * 255 + 0.5) | 0;
       u8[bi + 9] = (node.g * 255 + 0.5) | 0;
       u8[bi + 10] = (node.b * 255 + 0.5) | 0;
-      u8[bi + 11] = 255;
+      u8[bi + 11] = (opacity * 255 + 0.5) | 0;
       f32[fi + 3] = node.radius;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
@@ -338,13 +497,23 @@ export class Renderer {
     let vi = 0;
     for (let i = 0; i <= SEGMENTS; i++) {
       const t = i / SEGMENTS;
-      template[vi++] = t; template[vi++] = -SHAFT_HW; template[vi++] = 0;
-      template[vi++] = t; template[vi++] =  SHAFT_HW; template[vi++] = 0;
+      template[vi++] = t;
+      template[vi++] = -SHAFT_HW;
+      template[vi++] = 0;
+      template[vi++] = t;
+      template[vi++] = SHAFT_HW;
+      template[vi++] = 0;
     }
     // Head vertices (indices 18, 19, 20)
-    template[vi++] = 0; template[vi++] = -HEAD_HW; template[vi++] = 1;
-    template[vi++] = 0; template[vi++] =  0;       template[vi++] = 2;
-    template[vi++] = 0; template[vi++] =  HEAD_HW; template[vi++] = 1;
+    template[vi++] = 0;
+    template[vi++] = -HEAD_HW;
+    template[vi++] = 1;
+    template[vi++] = 0;
+    template[vi++] = 0;
+    template[vi++] = 2;
+    template[vi++] = 0;
+    template[vi++] = HEAD_HW;
+    template[vi++] = 1;
 
     const templateBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, templateBuf);
@@ -358,10 +527,14 @@ export class Renderer {
     let ii = 0;
     for (let i = 0; i < SEGMENTS; i++) {
       const b = i * 2;
-      indices[ii++] = b;     indices[ii++] = b + 2; indices[ii++] = b + 3;
-      indices[ii++] = b;     indices[ii++] = b + 3; indices[ii++] = b + 1;
+      indices[ii++] = b;
+      indices[ii++] = b + 2;
+      indices[ii++] = b + 3;
+      indices[ii++] = b;
+      indices[ii++] = b + 3;
+      indices[ii++] = b + 1;
     }
-    indices[ii++] = headBase;     // head bottom
+    indices[ii++] = headBase; // head bottom
     indices[ii++] = headBase + 1; // head tip
     indices[ii++] = headBase + 2; // head top
     const indexBuf = gl.createBuffer();
@@ -369,8 +542,7 @@ export class Renderer {
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Single interleaved instance buffer
-    // Per edge: [srcXY(2×f32), tgtXY(2×f32), srcRadius(f32), tgtRadius(f32), RGBA(4×u8)] = 28 bytes
-    const STRIDE = 28;
+    // Per edge: [srcXY(2×f32), tgtXY(2×f32), srcRadius(f32), tgtRadius(f32), RGBA(4×u8), width(f32)] = 32 bytes
     const buf = gl.createBuffer();
     if (!buf) throw new Error("Failed to create buffer");
     this.edgeInstanceBuffer = buf;
@@ -378,23 +550,28 @@ export class Renderer {
 
     // a_source (vec2) at byte offset 0
     gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, STRIDE, 0);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, EDGE_STRIDE, 0);
     gl.vertexAttribDivisor(1, 1);
 
     // a_target (vec2) at byte offset 8
     gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, EDGE_STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
     // a_color (vec4 normalized u8) at byte offset 24
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 24);
+    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, EDGE_STRIDE, 24);
     gl.vertexAttribDivisor(3, 1);
 
     // a_radii (vec2: srcRadius, tgtRadius) at byte offset 16
     gl.enableVertexAttribArray(4);
-    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, STRIDE, 16);
+    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, EDGE_STRIDE, 16);
     gl.vertexAttribDivisor(4, 1);
+
+    // a_width (float) at byte offset 28
+    gl.enableVertexAttribArray(5);
+    gl.vertexAttribPointer(5, 1, gl.FLOAT, false, EDGE_STRIDE, 28);
+    gl.vertexAttribDivisor(5, 1);
 
     gl.bindVertexArray(null);
     return vao;
@@ -413,49 +590,113 @@ export class Renderer {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 1, gl.FLOAT, false, 0, 0);
 
-    // Reuse existing edge instance buffer (same 28-byte stride layout)
-    const STRIDE = 28;
+    // Reuse existing edge instance buffer (32-byte stride layout)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
 
     gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, STRIDE, 0);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, EDGE_STRIDE, 0);
     gl.vertexAttribDivisor(1, 1);
 
     gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, STRIDE, 8);
+    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, EDGE_STRIDE, 8);
     gl.vertexAttribDivisor(2, 1);
 
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, STRIDE, 24);
+    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, EDGE_STRIDE, 24);
     gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
     return vao;
   }
 
-  setEdges(buffer: ArrayBufferView, count: number): void {
+  /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
+  private packEdgeBuffer(edges: Edge[]): { buffer: Uint8Array; count: number; groupSizes: number[] } {
+    const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const arrayBuf = new ArrayBuffer(sorted.length * EDGE_STRIDE);
+    const f32 = new Float32Array(arrayBuf);
+    const u32 = new Uint32Array(arrayBuf);
+    let count = 0;
+    const groupSizes: number[] = [];
+    let currentZ = -Infinity;
+    let groupSize = 0;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const edge = sorted[i];
+      const src = this.nodeMap.get(edge.source);
+      const tgt = this.nodeMap.get(edge.target);
+      if (!src || !tgt) continue;
+
+      const z = edge.zIndex ?? 0;
+      if (z !== currentZ) {
+        if (groupSize > 0) groupSizes.push(groupSize);
+        currentZ = z;
+        groupSize = 0;
+      }
+
+      const slot = count * 8; // 32 bytes / 4 = 8 uint32-slots per edge
+      f32[slot] = src.x;
+      f32[slot + 1] = src.y;
+      f32[slot + 2] = tgt.x;
+      f32[slot + 3] = tgt.y;
+      f32[slot + 4] = src.radius;
+      f32[slot + 5] = tgt.radius;
+      u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a);
+      f32[slot + 7] = edge.width ?? 1.0;
+      groupSize++;
+      count++;
+    }
+    if (groupSize > 0) groupSizes.push(groupSize);
+
+    return { buffer: new Uint8Array(arrayBuf, 0, count * EDGE_STRIDE), count, groupSizes };
+  }
+
+  private setEdgeObjects(edges: Edge[], animate: boolean): void {
+    if (animate && this.dataAnimDuration > 0 && this.edgeObjects.length > 0) {
+      this.oldEdges = this.edgeObjects;
+      this.oldEdgeMap.clear();
+      for (const e of this.oldEdges) this.oldEdgeMap.set(e.id, e);
+      this.targetEdges = edges;
+    }
+
+    this.edgeObjects = edges;
+    this.edgeMap.clear();
+    for (const e of edges) this.edgeMap.set(e.id, e);
+
+    const { buffer, count, groupSizes } = this.packEdgeBuffer(edges);
     this.edgeCount = count;
     if (count > 0) {
+      const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
       const gl = this.gl;
-      const BYTES_PER_EDGE = 28;
-      const src = new Uint8Array(buffer.buffer, buffer.byteOffset, count * BYTES_PER_EDGE);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
+    }
+  }
 
-      // Fisher-Yates shuffle so any prefix is a spatially representative sample.
-      // This enables the draw-count cap in render() to produce uniform coverage.
-      const indices = new Uint32Array(count);
-      for (let i = 0; i < count; i++) indices[i] = i;
-      for (let i = count - 1; i > 0; i--) {
-        const j = (Math.random() * (i + 1)) | 0;
-        const t = indices[i];
-        indices[i] = indices[j];
-        indices[j] = t;
+  /** Set edges using Edge object array. Renderer resolves node positions. */
+  setEdges(edges: Edge[]): void;
+  /** Set edges using raw binary buffer (legacy API). */
+  setEdges(buffer: ArrayBufferView, count: number): void;
+  setEdges(edgesOrBuffer: Edge[] | ArrayBufferView, count?: number): void {
+    if (Array.isArray(edgesOrBuffer)) {
+      const shouldAnimate = this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
+      this.setEdgeObjects(edgesOrBuffer, shouldAnimate);
+      if (shouldAnimate) {
+        this.startDataAnimation();
       }
-      const shuffled = new Uint8Array(count * BYTES_PER_EDGE);
-      for (let i = 0; i < count; i++) {
-        const srcOff = indices[i] * BYTES_PER_EDGE;
-        shuffled.set(src.subarray(srcOff, srcOff + BYTES_PER_EDGE), i * BYTES_PER_EDGE);
-      }
+      this.requestRender();
+      return;
+    }
 
+    // Legacy raw buffer path
+    const buffer = edgesOrBuffer;
+    const edgeCount = count!;
+    this.edgeCount = edgeCount;
+    this.edgeObjects = [];
+    this.edgeMap.clear();
+    if (edgeCount > 0) {
+      const gl = this.gl;
+      const src = new Uint8Array(buffer.buffer, buffer.byteOffset, edgeCount * EDGE_STRIDE);
+      const shuffled = shuffleEdgeBuffer(src, edgeCount);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
     }
@@ -471,12 +712,270 @@ export class Renderer {
   }
 
   setNodes(nodes: Node[]): void {
+    const shouldAnimate = this.dataAnimDuration > 0 && this.nodes.length > 0;
+
+    if (shouldAnimate) {
+      this.oldNodes = this.nodes;
+      this.oldNodeMap.clear();
+      for (const n of this.oldNodes) this.oldNodeMap.set(n.id, n);
+      this.targetNodes = nodes;
+
+      // Snapshot edge state for animation too
+      if (this.edgeObjects.length > 0) {
+        this.oldEdges = this.edgeObjects;
+        this.oldEdgeMap.clear();
+        for (const e of this.oldEdges) this.oldEdgeMap.set(e.id, e);
+        this.targetEdges = this.edgeObjects;
+      }
+    }
+
     this.nodes = nodes;
     this.nodeCount = nodes.length;
+    this.rebuildNodeMap(nodes);
     this.uploadNodeData(this.gl, nodes);
+
+    // Re-pack edges if we have object edges (positions changed)
+    if (this.edgeObjects.length > 0) {
+      const { buffer, count, groupSizes } = this.packEdgeBuffer(this.edgeObjects);
+      this.edgeCount = count;
+      if (count > 0) {
+        const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
+      }
+    }
+
     this.initCamera();
+
+    if (shouldAnimate) {
+      this.startDataAnimation();
+    }
+
     this.requestRender();
   }
+
+  // --- Data animation ---
+
+  private startDataAnimation(): void {
+    if (this.dataAnimId !== null) {
+      cancelAnimationFrame(this.dataAnimId);
+    }
+    this.dataAnimStart = performance.now();
+
+    const animate = (now: number): void => {
+      const elapsed = now - this.dataAnimStart;
+      const rawT = Math.min(elapsed / this.dataAnimDuration, 1);
+      const t = this.dataAnimEasing(rawT);
+
+      this.interpolateNodes(t);
+      this.interpolateEdges(t);
+      this.render();
+
+      if (rawT < 1) {
+        this.dataAnimId = requestAnimationFrame(animate);
+      } else {
+        this.dataAnimId = null;
+        // Final state: upload actual target data (no interpolation artifacts)
+        this.uploadNodeData(this.gl, this.nodes);
+        if (this.edgeObjects.length > 0) {
+          const { buffer, count, groupSizes } = this.packEdgeBuffer(this.edgeObjects);
+          this.edgeCount = count;
+          if (count > 0) {
+            const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
+            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+            this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
+          }
+        }
+        this.oldNodes = [];
+        this.oldNodeMap.clear();
+        this.targetNodes = [];
+        this.oldEdges = [];
+        this.oldEdgeMap.clear();
+        this.targetEdges = [];
+      }
+    };
+
+    this.dataAnimId = requestAnimationFrame(animate);
+  }
+
+  private interpolateNodes(t: number): void {
+    const raw = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    const target = raw.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const buf = new ArrayBuffer(target.length * 16);
+    const f32 = new Float32Array(buf);
+    const u8 = new Uint8Array(buf);
+
+    for (let i = 0; i < target.length; i++) {
+      const node = target[i];
+      const old = this.oldNodeMap.get(node.id);
+      const fi = i * 4;
+      const bi = i * 16;
+
+      if (old) {
+        f32[fi] = lerp(old.x, node.x, t);
+        f32[fi + 1] = lerp(old.y, node.y, t);
+        const oldOpacity = old.opacity ?? 1.0;
+        const newOpacity = node.opacity ?? 1.0;
+        const opacity = lerp(oldOpacity, newOpacity, t);
+        const oldR = lerp(old.r, node.r, t);
+        const oldG = lerp(old.g, node.g, t);
+        const oldB = lerp(old.b, node.b, t);
+        u8[bi + 8] = (oldR * 255 + 0.5) | 0;
+        u8[bi + 9] = (oldG * 255 + 0.5) | 0;
+        u8[bi + 10] = (oldB * 255 + 0.5) | 0;
+        u8[bi + 11] = (opacity * 255 + 0.5) | 0;
+        f32[fi + 3] = lerp(old.radius, node.radius, t);
+      } else {
+        // New node — fade in
+        f32[fi] = node.x;
+        f32[fi + 1] = node.y;
+        const opacity = (node.opacity ?? 1.0) * t;
+        u8[bi + 8] = (node.r * 255 + 0.5) | 0;
+        u8[bi + 9] = (node.g * 255 + 0.5) | 0;
+        u8[bi + 10] = (node.b * 255 + 0.5) | 0;
+        u8[bi + 11] = (opacity * 255 + 0.5) | 0;
+        f32[fi + 3] = node.radius;
+      }
+    }
+
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
+    this.nodeCount = target.length;
+  }
+
+  private interpolateEdges(t: number): void {
+    const raw = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
+    if (raw.length === 0) return;
+    const target = raw.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+
+    // Build interpolated node positions for resolving edge endpoints
+    const targetNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    const interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
+    for (const node of targetNodes) {
+      const old = this.oldNodeMap.get(node.id);
+      if (old) {
+        interpNodeMap.set(node.id, {
+          x: lerp(old.x, node.x, t),
+          y: lerp(old.y, node.y, t),
+          radius: lerp(old.radius, node.radius, t),
+        });
+      } else {
+        interpNodeMap.set(node.id, { x: node.x, y: node.y, radius: node.radius });
+      }
+    }
+
+    const arrayBuf = new ArrayBuffer(target.length * EDGE_STRIDE);
+    const f32 = new Float32Array(arrayBuf);
+    const u32 = new Uint32Array(arrayBuf);
+    let count = 0;
+
+    for (let i = 0; i < target.length; i++) {
+      const edge = target[i];
+      const src = interpNodeMap.get(edge.source);
+      const tgt = interpNodeMap.get(edge.target);
+      if (!src || !tgt) continue;
+
+      const old = this.oldEdgeMap.get(edge.id);
+      const slot = count * 8;
+      f32[slot] = src.x;
+      f32[slot + 1] = src.y;
+      f32[slot + 2] = tgt.x;
+      f32[slot + 3] = tgt.y;
+      f32[slot + 4] = src.radius;
+      f32[slot + 5] = tgt.radius;
+
+      if (old) {
+        const a = lerp(old.a, edge.a, t);
+        const r = lerp(old.r, edge.r, t);
+        const g = lerp(old.g, edge.g, t);
+        const b = lerp(old.b, edge.b, t);
+        const w = lerp(old.width ?? 1.0, edge.width ?? 1.0, t);
+        u32[slot + 6] = packPremultiplied(r, g, b, a);
+        f32[slot + 7] = w;
+      } else {
+        // New edge — fade in
+        u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a * t);
+        f32[slot + 7] = edge.width ?? 1.0;
+      }
+      count++;
+    }
+
+    this.edgeCount = count;
+    if (count > 0) {
+      // Skip shuffle during animation frames for performance
+      const gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Uint8Array(arrayBuf, 0, count * EDGE_STRIDE),
+        gl.DYNAMIC_DRAW,
+      );
+    }
+  }
+
+  // --- Hit testing ---
+
+  private hitTestNode(worldX: number, worldY: number): Node | null {
+    let closest: Node | null = null;
+    let closestDist = Infinity;
+
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i];
+      const dx = worldX - node.x;
+      const dy = worldY - node.y;
+      const distSq = dx * dx + dy * dy;
+      const rSq = node.radius * node.radius;
+      if (distSq < rSq && distSq < closestDist) {
+        closestDist = distSq;
+        closest = node;
+      }
+    }
+
+    return closest;
+  }
+
+  private hitTestEdge(worldX: number, worldY: number): Edge | null {
+    // Tolerance: ~5px in world coords
+    const rect = this.getRect();
+    const worldPerPx = (this.halfW * 2) / rect.width;
+    const tolerance = worldPerPx * 5;
+    const tolSq = tolerance * tolerance;
+
+    let closest: Edge | null = null;
+    let closestDistSq = tolSq;
+
+    for (let i = 0; i < this.edgeObjects.length; i++) {
+      const edge = this.edgeObjects[i];
+      const src = this.nodeMap.get(edge.source);
+      const tgt = this.nodeMap.get(edge.target);
+      if (!src || !tgt) continue;
+
+      // Quick bounding box check
+      const minX = Math.min(src.x, tgt.x) - tolerance;
+      const maxX = Math.max(src.x, tgt.x) + tolerance;
+      const minY = Math.min(src.y, tgt.y) - tolerance;
+      const maxY = Math.max(src.y, tgt.y) + tolerance;
+      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue;
+
+      // Sample Bezier at 16 points
+      for (let s = 0; s <= 16; s++) {
+        const t = s / 16;
+        const pt = sampleBezier(src.x, src.y, tgt.x, tgt.y, CURVATURE, t);
+        const dx = worldX - pt.x;
+        const dy = worldY - pt.y;
+        const dSq = dx * dx + dy * dy;
+        if (dSq < closestDistSq) {
+          closestDistSq = dSq;
+          closest = edge;
+        }
+      }
+    }
+
+    return closest;
+  }
+
+  // --- Event system ---
 
   private setupInteraction(): void {
     const signal = this.abortController.signal;
@@ -494,13 +993,15 @@ export class Renderer {
       { signal, passive: false },
     );
 
-    // Mouse drag
+    // Mouse drag + click detection
     canvas.addEventListener(
       "mousedown",
       (e) => {
         this.isDragging = true;
         this.lastMouseX = e.clientX;
         this.lastMouseY = e.clientY;
+        this.dragStartX = e.clientX;
+        this.dragStartY = e.clientY;
         canvas.style.cursor = "grabbing";
       },
       { signal },
@@ -509,7 +1010,10 @@ export class Renderer {
     window.addEventListener(
       "mousemove",
       (e) => {
-        if (!this.isDragging) return;
+        if (!this.isDragging) {
+          this.updateHover(e);
+          return;
+        }
         const dx = e.clientX - this.lastMouseX;
         const dy = e.clientY - this.lastMouseY;
         this.lastMouseX = e.clientX;
@@ -521,9 +1025,25 @@ export class Renderer {
 
     window.addEventListener(
       "mouseup",
-      () => {
-        this.isDragging = false;
-        canvas.style.cursor = "grab";
+      (e) => {
+        if (this.isDragging) {
+          const dx = e.clientX - this.dragStartX;
+          const dy = e.clientY - this.dragStartY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < CLICK_THRESHOLD) {
+            this.handleClick(e);
+          }
+          this.isDragging = false;
+          canvas.style.cursor = "grab";
+        }
+      },
+      { signal },
+    );
+
+    canvas.addEventListener(
+      "dblclick",
+      (e) => {
+        this.handleDblClick(e);
       },
       { signal },
     );
@@ -580,6 +1100,163 @@ export class Renderer {
     );
   }
 
+  private handleClick(e: MouseEvent): void {
+    const world = this.screenToWorld(e.clientX, e.clientY);
+    const worldX = world.x;
+    const worldY = world.y;
+
+    const node = this.hitTestNode(worldX, worldY);
+    if (node && this.onNodeClick) {
+      this.onNodeClick({ type: "click", nodeId: node.id, node, worldX, worldY, originalEvent: e });
+      return;
+    }
+
+    const edge = this.hitTestEdge(worldX, worldY);
+    if (edge && this.onEdgeClick) {
+      this.onEdgeClick({ type: "click", edgeId: edge.id, edge, worldX, worldY, originalEvent: e });
+      return;
+    }
+
+    if (this.onBackgroundClick) {
+      this.onBackgroundClick({ type: "click", worldX, worldY, originalEvent: e });
+    }
+  }
+
+  private handleDblClick(e: MouseEvent): void {
+    const world = this.screenToWorld(e.clientX, e.clientY);
+    const worldX = world.x;
+    const worldY = world.y;
+
+    const node = this.hitTestNode(worldX, worldY);
+    if (node && this.onNodeDblClick) {
+      this.onNodeDblClick({
+        type: "dblclick",
+        nodeId: node.id,
+        node,
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
+      return;
+    }
+
+    const edge = this.hitTestEdge(worldX, worldY);
+    if (edge && this.onEdgeDblClick) {
+      this.onEdgeDblClick({
+        type: "dblclick",
+        edgeId: edge.id,
+        edge,
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
+      return;
+    }
+
+    if (this.onBackgroundDblClick) {
+      this.onBackgroundDblClick({ type: "dblclick", worldX, worldY, originalEvent: e });
+    }
+  }
+
+  private updateHover(e: MouseEvent): void {
+    // Only process hover when we have callbacks
+    if (
+      !this.onNodeHoverEnter &&
+      !this.onNodeHoverLeave &&
+      !this.onEdgeHoverEnter &&
+      !this.onEdgeHoverLeave
+    )
+      return;
+
+    const world = this.screenToWorld(e.clientX, e.clientY);
+    const worldX = world.x;
+    const worldY = world.y;
+
+    const node = this.hitTestNode(worldX, worldY);
+    const nodeId = node ? node.id : null;
+
+    if (nodeId !== this.hoveredNodeId) {
+      if (this.hoveredNodeId && this.onNodeHoverLeave) {
+        const oldNode = this.nodeMap.get(this.hoveredNodeId);
+        if (oldNode) {
+          this.onNodeHoverLeave({
+            type: "hoverleave",
+            nodeId: this.hoveredNodeId,
+            node: oldNode,
+            worldX,
+            worldY,
+            originalEvent: e,
+          });
+        }
+      }
+      if (nodeId && node && this.onNodeHoverEnter) {
+        this.onNodeHoverEnter({
+          type: "hoverenter",
+          nodeId,
+          node,
+          worldX,
+          worldY,
+          originalEvent: e,
+        });
+      }
+      this.hoveredNodeId = nodeId;
+    }
+
+    // Only check edge hover if not hovering a node
+    if (!nodeId) {
+      const edge = this.hitTestEdge(worldX, worldY);
+      const edgeId = edge ? edge.id : null;
+
+      if (edgeId !== this.hoveredEdgeId) {
+        if (this.hoveredEdgeId && this.onEdgeHoverLeave) {
+          const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
+          if (oldEdge) {
+            this.onEdgeHoverLeave({
+              type: "hoverleave",
+              edgeId: this.hoveredEdgeId,
+              edge: oldEdge,
+              worldX,
+              worldY,
+              originalEvent: e,
+            });
+          }
+        }
+        if (edgeId && edge && this.onEdgeHoverEnter) {
+          this.onEdgeHoverEnter({
+            type: "hoverenter",
+            edgeId,
+            edge,
+            worldX,
+            worldY,
+            originalEvent: e,
+          });
+        }
+        this.hoveredEdgeId = edgeId;
+      }
+
+      this.canvas.style.cursor = edgeId ? "pointer" : "grab";
+    } else {
+      // Hovering a node — clear any edge hover
+      if (this.hoveredEdgeId) {
+        if (this.onEdgeHoverLeave) {
+          const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
+          if (oldEdge) {
+            this.onEdgeHoverLeave({
+              type: "hoverleave",
+              edgeId: this.hoveredEdgeId,
+              edge: oldEdge,
+              worldX,
+              worldY,
+              originalEvent: e,
+            });
+          }
+        }
+        this.hoveredEdgeId = null;
+      }
+      this.canvas.style.cursor = "pointer";
+    }
+  }
+
   private storeTouches(touches: TouchList): void {
     this.touchCount = touches.length;
     if (touches.length >= 1) {
@@ -616,7 +1293,7 @@ export class Renderer {
   }
 
   private requestRender(): void {
-    if (!this.renderPending) {
+    if (!this.renderPending && this.dataAnimId === null) {
       this.renderPending = true;
       requestAnimationFrame(() => {
         this.renderPending = false;
@@ -732,7 +1409,25 @@ export class Renderer {
     const projOffsetX = this.projOffsetX;
     const projOffsetY = this.projOffsetY;
 
-    // Draw edges behind nodes (LOD: lines when zoomed out, arrows when close)
+    // Draw nodes (behind edges)
+    gl.useProgram(this.program);
+    if (
+      projScaleX !== this.sentNodeScaleX ||
+      projScaleY !== this.sentNodeScaleY ||
+      projOffsetX !== this.sentNodeOffsetX ||
+      projOffsetY !== this.sentNodeOffsetY
+    ) {
+      gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
+      gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
+      this.sentNodeScaleX = projScaleX;
+      this.sentNodeScaleY = projScaleY;
+      this.sentNodeOffsetX = projOffsetX;
+      this.sentNodeOffsetY = projOffsetY;
+    }
+    gl.bindVertexArray(this.vao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
+
+    // Draw edges on top of nodes (LOD: lines when zoomed out, arrows when close)
     // Cap instance count to limit fragment overdraw on high-DPI displays.
     // The edge buffer is shuffled at upload time so any prefix has uniform spatial coverage.
     const MAX_DRAW_EDGES = 65536;
@@ -803,29 +1498,15 @@ export class Renderer {
         gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
       }
     }
-
-    // Draw nodes on top
-    gl.useProgram(this.program);
-    if (
-      projScaleX !== this.sentNodeScaleX ||
-      projScaleY !== this.sentNodeScaleY ||
-      projOffsetX !== this.sentNodeOffsetX ||
-      projOffsetY !== this.sentNodeOffsetY
-    ) {
-      gl.uniform2f(this.scaleLocation, projScaleX, projScaleY);
-      gl.uniform2f(this.offsetLocation, projOffsetX, projOffsetY);
-      this.sentNodeScaleX = projScaleX;
-      this.sentNodeScaleY = projScaleY;
-      this.sentNodeOffsetX = projOffsetX;
-      this.sentNodeOffsetY = projOffsetY;
-    }
-    gl.bindVertexArray(this.vao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
 
   destroy(): void {
     this.abortController.abort();
     this.cancelAnimation();
+    if (this.dataAnimId !== null) {
+      cancelAnimationFrame(this.dataAnimId);
+      this.dataAnimId = null;
+    }
     this.resizeObserver.disconnect();
   }
 }

@@ -1,5 +1,5 @@
 import { Renderer } from "../src/index";
-import type { Node } from "../src/index";
+import type { Node, Edge } from "../src/index";
 import smallResources from "./small.minimal-resources.json";
 
 interface Resource {
@@ -40,66 +40,131 @@ const PRIVILEGE_COLORS: Record<string, [number, number, number, number]> = {
 const DEFAULT_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
 const DEFAULT_PRIV_COLOR: [number, number, number, number] = [0.5, 0.5, 0.5, 0.3];
 
-// Pre-compute premultiplied RGBA as packed uint32 (little-endian: R | G<<8 | B<<16 | A<<24)
-function packPremultiplied(r: number, g: number, b: number, a: number): number {
-  return (
-    ((r * a * 255 + 0.5) | 0) |
-    (((g * a * 255 + 0.5) | 0) << 8) |
-    (((b * a * 255 + 0.5) | 0) << 16) |
-    (((a * 255 + 0.5) | 0) << 24)
-  );
-}
-
-const PRIVILEGE_U32: Record<string, number> = {};
-for (const [key, [r, g, b, a]] of Object.entries(PRIVILEGE_COLORS)) {
-  PRIVILEGE_U32[key] = packPremultiplied(r, g, b, a);
-}
-const DEFAULT_PRIV_U32 = packPremultiplied(...DEFAULT_PRIV_COLOR);
+const DIM_OPACITY = 0.12;
 
 function toNodes(data: Resource[]): Node[] {
   return data.map((res) => {
     const [r, g, b] = TYPE_COLORS[res.InternalType] ?? DEFAULT_COLOR;
-    return { x: res.x, y: res.y, r, g, b, radius: 2 };
+    return { id: res.InternalArn, x: res.x, y: res.y, r, g, b, radius: 2, opacity: 1.0 };
   });
 }
 
-function buildPositionLookup(resources: Resource[]): Map<string, { x: number; y: number }> {
-  const map = new Map<string, { x: number; y: number }>();
-  for (const r of resources) {
-    map.set(r.InternalArn, { x: r.x, y: r.y });
+function toEdges(edgeData: EdgeData[], resources: Resource[]): Edge[] {
+  const posMap = new Set(resources.map((r) => r.InternalArn));
+  const edges: Edge[] = [];
+  for (const e of edgeData) {
+    if (!posMap.has(e.PrincipalArn) || !posMap.has(e.ResourceArn)) continue;
+    const [r, g, b, a] = PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
+    edges.push({
+      id: `${e.PrincipalArn}->${e.ResourceArn}`,
+      source: e.PrincipalArn,
+      target: e.ResourceArn,
+      r,
+      g,
+      b,
+      a,
+      zIndex: e.HasPrivileges === "Escalation" ? 1 : 0,
+    });
   }
-  return map;
+  return edges;
 }
 
-const BYTES_PER_EDGE = 28; // 4 floats pos (16) + 2 floats radii (8) + 4 uint8 rgba (4)
-const NODE_RADIUS = 2;
+// Adjacency structures for highlighting
+type Adjacency = Map<string, Set<string>>;
+type EdgesByNode = Map<string, Set<string>>;
 
-function toEdgeBuffer(
-  edgeData: EdgeData[],
-  lookup: Map<string, { x: number; y: number }>,
-): { buffer: Uint8Array; count: number } {
-  const arrayBuf = new ArrayBuffer(edgeData.length * BYTES_PER_EDGE);
-  const f32 = new Float32Array(arrayBuf);
-  const u32 = new Uint32Array(arrayBuf);
-  let count = 0;
-  for (let i = 0; i < edgeData.length; i++) {
-    const e = edgeData[i];
-    const src = lookup.get(e.PrincipalArn);
-    const tgt = lookup.get(e.ResourceArn);
-    if (!src || !tgt) continue;
-    const slot = count * 7; // 28 / 4 = 7 uint32-slots per edge
-    f32[slot] = src.x;
-    f32[slot + 1] = src.y;
-    f32[slot + 2] = tgt.x;
-    f32[slot + 3] = tgt.y;
-    f32[slot + 4] = NODE_RADIUS;
-    f32[slot + 5] = NODE_RADIUS;
-    u32[slot + 6] = PRIVILEGE_U32[e.HasPrivileges] ?? DEFAULT_PRIV_U32;
-    count++;
+function buildAdjacency(edges: Edge[]): { adjacency: Adjacency; edgesByNode: EdgesByNode } {
+  const adjacency: Adjacency = new Map();
+  const edgesByNode: EdgesByNode = new Map();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.source)) adjacency.set(edge.source, new Set());
+    if (!adjacency.has(edge.target)) adjacency.set(edge.target, new Set());
+    adjacency.get(edge.source)!.add(edge.target);
+    adjacency.get(edge.target)!.add(edge.source);
+
+    if (!edgesByNode.has(edge.source)) edgesByNode.set(edge.source, new Set());
+    if (!edgesByNode.has(edge.target)) edgesByNode.set(edge.target, new Set());
+    edgesByNode.get(edge.source)!.add(edge.id);
+    edgesByNode.get(edge.target)!.add(edge.id);
   }
-  return { buffer: new Uint8Array(arrayBuf, 0, count * BYTES_PER_EDGE), count };
+  return { adjacency, edgesByNode };
 }
 
+// Current state
+let currentNodes: Node[] = toNodes(smallResources as Resource[]);
+let currentEdges: Edge[] = [];
+let adjacency: Adjacency = new Map();
+let edgesByNode: EdgesByNode = new Map();
+let edgeMap = new Map<string, Edge>();
+
+function updateState(nodes: Node[], edges: Edge[]) {
+  currentNodes = nodes;
+  currentEdges = edges;
+  const adj = buildAdjacency(edges);
+  adjacency = adj.adjacency;
+  edgesByNode = adj.edgesByNode;
+  edgeMap.clear();
+  for (const e of edges) edgeMap.set(e.id, e);
+}
+
+function highlightNode(nodeId: string) {
+  const neighbors = adjacency.get(nodeId) ?? new Set<string>();
+  const connectedEdges = edgesByNode.get(nodeId) ?? new Set<string>();
+
+  const highlightedNodeIds = new Set([nodeId, ...neighbors]);
+
+  const dimmedNodes = currentNodes.map((n) => ({
+    ...n,
+    opacity: highlightedNodeIds.has(n.id) ? 1.0 : DIM_OPACITY,
+  }));
+
+  const dimmedEdges = currentEdges.map((e) => ({
+    ...e,
+    a: connectedEdges.has(e.id) ? e.a : e.a * DIM_OPACITY,
+  }));
+
+  renderer.setNodes(dimmedNodes);
+  renderer.setEdges(dimmedEdges);
+}
+
+function highlightEdge(edgeId: string) {
+  const edge = edgeMap.get(edgeId);
+  if (!edge) return;
+
+  const highlightedNodeIds = new Set([edge.source, edge.target]);
+
+  const dimmedNodes = currentNodes.map((n) => ({
+    ...n,
+    opacity: highlightedNodeIds.has(n.id) ? 1.0 : DIM_OPACITY,
+  }));
+
+  const dimmedEdges = currentEdges.map((e) => ({
+    ...e,
+    a: e.id === edgeId ? e.a : e.a * DIM_OPACITY,
+  }));
+
+  renderer.setNodes(dimmedNodes);
+  renderer.setEdges(dimmedEdges);
+}
+
+function clearHighlight() {
+  renderer.setNodes(currentNodes);
+  renderer.setEdges(currentEdges);
+}
+
+const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const renderer = new Renderer({
+  canvas,
+  nodes: currentNodes,
+  animationDuration: 300,
+  onNodeClick: (e) => highlightNode(e.nodeId),
+  onEdgeClick: (e) => highlightEdge(e.edgeId),
+  onBackgroundClick: () => clearHighlight(),
+});
+
+renderer.render();
+
+// Load edges for initial small dataset
 const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
   small: () =>
     Promise.all([
@@ -118,16 +183,11 @@ const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
     ]),
 };
 
-const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-const renderer = new Renderer({ canvas, nodes: toNodes(smallResources as Resource[]) });
-
-renderer.render();
-
-// Load edges for initial small dataset
 loaders.small().then(([resources, edgeData]) => {
-  const lookup = buildPositionLookup(resources);
-  const { buffer, count } = toEdgeBuffer(edgeData, lookup);
-  renderer.setEdges(buffer, count);
+  const nodes = toNodes(resources);
+  const edges = toEdges(edgeData, resources);
+  updateState(nodes, edges);
+  renderer.setEdges(edges);
 });
 
 document.getElementById("fit-btn")?.addEventListener("click", () => {
@@ -144,9 +204,10 @@ document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
   }
 
   loaders[dataset]().then(([resources, edgeData]) => {
-    const lookup = buildPositionLookup(resources);
-    renderer.setNodes(toNodes(resources));
-    const { buffer, count } = toEdgeBuffer(edgeData, lookup);
-    renderer.setEdges(buffer, count);
+    const nodes = toNodes(resources);
+    const edges = toEdges(edgeData, resources);
+    updateState(nodes, edges);
+    renderer.setNodes(nodes);
+    renderer.setEdges(edges);
   });
 });
