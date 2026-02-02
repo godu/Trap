@@ -209,5 +209,6 @@ document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
     updateState(nodes, edges);
     renderer.setNodes(nodes);
     renderer.setEdges(edges);
+    renderer.fitToNodes();
   });
 });
