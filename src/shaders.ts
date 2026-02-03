@@ -150,30 +150,3 @@ void main() {
 }
 `;
 
-// Edge LOD line shader — simple GL_LINES when zoomed out (arrows sub-pixel).
-// Two vertices per instance: endpoint 0.0 (source) and 1.0 (target).
-export const edgeLineVertexSource = `#version 300 es
-layout(location = 0) in float a_endpoint;
-layout(location = 1) in vec2 a_source;
-layout(location = 2) in vec2 a_target;
-layout(location = 3) in vec4 a_color;
-
-uniform vec2 u_scale;
-uniform vec2 u_offset;
-uniform vec4 u_viewport;
-
-flat out vec4 v_color;
-
-void main() {
-  vec2 lo = min(a_source, a_target);
-  vec2 hi = max(a_source, a_target);
-  if (hi.x < u_viewport.x || lo.x > u_viewport.z ||
-      hi.y < u_viewport.y || lo.y > u_viewport.w) {
-    gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
-    return;
-  }
-  v_color = a_color;
-  vec2 pos = mix(a_source, a_target, a_endpoint);
-  gl_Position = vec4(pos * u_scale + u_offset, 0.0, 1.0);
-}
-`;
