@@ -33,7 +33,6 @@ Read the project's CLAUDE.md files first to understand current architecture and 
 - **Uniform caching**: track last-set values; skip redundant `gl.uniform*` calls.
 - **State changes**: batch by program, blend mode, VAO. Minimize `useProgram`, `enable`/`disable`, `blendFunc` switches per frame.
 - **Shader efficiency**: move invariant math from fragment to vertex shader. Avoid branching in fragments. Use `step`/`smoothstep` over `if`.
-- **LOD**: verify pixel-size thresholds — don't render complex geometry for sub-pixel elements.
 - **Culling**: frustum-cull before submitting instances. Use degenerate output in shaders for off-screen geometry.
 - **Texture & framebuffer**: avoid creating/destroying per frame. Reuse and resize.
 
