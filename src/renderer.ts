@@ -769,7 +769,11 @@ export class Renderer {
   }
 
   /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
-  private packEdgeBuffer(edges: Edge[]): { buffer: Uint8Array; count: number; groupSizes: number[] } {
+  private packEdgeBuffer(edges: Edge[]): {
+    buffer: Uint8Array;
+    count: number;
+    groupSizes: number[];
+  } {
     const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureEdgeBuffer(sorted.length);
     const f32 = this.edgeF32!;
@@ -926,9 +930,10 @@ export class Renderer {
     const rawNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
     this.sortedTargetNodes = rawNodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
-    this.sortedTargetEdges = rawEdges.length > 0
-      ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-      : null;
+    this.sortedTargetEdges =
+      rawEdges.length > 0
+        ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
+        : null;
 
     const animate = (now: number): void => {
       const elapsed = now - this.dataAnimStart;

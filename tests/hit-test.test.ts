@@ -56,8 +56,12 @@ describe("sampleBezier", () => {
 
 describe("distSqToBezier", () => {
   // Horizontal edge (0,0)→(10,0), curvature 0.4 → ctrl (5,4)
-  const p0x = 0, p0y = 0, p2x = 10, p2y = 0;
-  const p1x = 5, p1y = 4; // control point
+  const p0x = 0,
+    p0y = 0,
+    p2x = 10,
+    p2y = 0;
+  const p1x = 5,
+    p1y = 4; // control point
 
   it("returns 0 for point exactly on the curve", () => {
     // Midpoint of curve is at (5, 2)
