@@ -18,7 +18,6 @@ Exported from `index.ts`:
 - Instanced rendering: one draw call for all nodes, one for all edges.
 - Node instance data: 6 floats (x, y, r, g, b, radius) = 24 bytes per node.
 - Edge instance data: 20 bytes per edge (4x float32 positions + uint32 packed premultiplied RGBA).
-- LOD system: arrow geometry when zoomed in, simple lines when zoomed out.
 - Orthographic camera with smooth animated transitions.
 
 ## Constraints

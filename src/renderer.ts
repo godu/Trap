@@ -4,7 +4,6 @@ import {
   fragmentSource,
   edgeVertexSource,
   edgeFragmentSource,
-  edgeLineVertexSource,
 } from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
 
@@ -277,13 +276,6 @@ export class Renderer {
   private edgeViewportLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
 
-  // Edge LOD line rendering
-  private edgeLineProgram!: WebGLProgram;
-  private edgeLineVao!: WebGLVertexArrayObject;
-  private edgeLineScaleLocation!: WebGLUniformLocation;
-  private edgeLineOffsetLocation!: WebGLUniformLocation;
-  private edgeLineViewportLocation!: WebGLUniformLocation;
-
   // Camera state (world-space view)
   private centerX = 0;
   private centerY = 0;
@@ -334,15 +326,6 @@ export class Renderer {
   private sentEdgeVpMinY = NaN;
   private sentEdgeVpMaxX = NaN;
   private sentEdgeVpMaxY = NaN;
-  private sentLineScaleX = NaN;
-  private sentLineScaleY = NaN;
-  private sentLineOffsetX = NaN;
-  private sentLineOffsetY = NaN;
-  private sentLineVpMinX = NaN;
-  private sentLineVpMinY = NaN;
-  private sentLineVpMaxX = NaN;
-  private sentLineVpMaxY = NaN;
-
   // Render throttling
   private renderPending = false;
 
@@ -481,17 +464,6 @@ export class Renderer {
     this.edgeViewportLocation = eVpLoc;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
-
-    // Edge LOD line program (shares fragment shader and instance buffer)
-    this.edgeLineProgram = createProgram(gl, edgeLineVertexSource, edgeFragmentSource);
-    const elSLoc = gl.getUniformLocation(this.edgeLineProgram, "u_scale");
-    const elOLoc = gl.getUniformLocation(this.edgeLineProgram, "u_offset");
-    const elVpLoc = gl.getUniformLocation(this.edgeLineProgram, "u_viewport");
-    if (!elSLoc || !elOLoc || !elVpLoc) throw new Error("Edge line uniforms not found");
-    this.edgeLineScaleLocation = elSLoc;
-    this.edgeLineOffsetLocation = elOLoc;
-    this.edgeLineViewportLocation = elVpLoc;
-    this.edgeLineVao = this.setupEdgeLineGeometry(gl);
 
     // Set constant edge uniforms once
     gl.useProgram(this.edgeProgram);
@@ -731,38 +703,6 @@ export class Renderer {
     gl.enableVertexAttribArray(5);
     gl.vertexAttribPointer(5, 1, gl.FLOAT, false, EDGE_STRIDE, 28);
     gl.vertexAttribDivisor(5, 1);
-
-    gl.bindVertexArray(null);
-    return vao;
-  }
-
-  private setupEdgeLineGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
-    const vao = gl.createVertexArray();
-    if (!vao) throw new Error("Failed to create edge line VAO");
-    gl.bindVertexArray(vao);
-
-    // Template: two endpoint values [0.0 = source, 1.0 = target]
-    const template = new Float32Array([0.0, 1.0]);
-    const templateBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, templateBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, template, gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 1, gl.FLOAT, false, 0, 0);
-
-    // Reuse existing edge instance buffer (32-byte stride layout)
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, EDGE_STRIDE, 0);
-    gl.vertexAttribDivisor(1, 1);
-
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribPointer(2, 2, gl.FLOAT, false, EDGE_STRIDE, 8);
-    gl.vertexAttribDivisor(2, 1);
-
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.UNSIGNED_BYTE, true, EDGE_STRIDE, 24);
-    gl.vertexAttribDivisor(3, 1);
 
     gl.bindVertexArray(null);
     return vao;
@@ -1611,7 +1551,7 @@ export class Renderer {
     const projOffsetX = this.projOffsetX;
     const projOffsetY = this.projOffsetY;
 
-    // Draw edges behind nodes (LOD: lines when zoomed out, arrows when close)
+    // Draw edges behind nodes.
     // Cap instance count to limit fragment overdraw on high-DPI displays.
     // The edge buffer is shuffled at upload time so any prefix has uniform spatial coverage.
     const MAX_DRAW_EDGES = 65536;
@@ -1621,66 +1561,34 @@ export class Renderer {
       const vpMinY = this.vpMinY;
       const vpMaxX = this.vpMaxX;
       const vpMaxY = this.vpMaxY;
-      // LOD: when node radius (2 world units) < 3px, arrow detail is sub-pixel → use lines
-      if (Math.abs(projScaleX) * this.canvas.width < 3.0) {
-        gl.useProgram(this.edgeLineProgram);
-        if (
-          projScaleX !== this.sentLineScaleX ||
-          projScaleY !== this.sentLineScaleY ||
-          projOffsetX !== this.sentLineOffsetX ||
-          projOffsetY !== this.sentLineOffsetY
-        ) {
-          gl.uniform2f(this.edgeLineScaleLocation, projScaleX, projScaleY);
-          gl.uniform2f(this.edgeLineOffsetLocation, projOffsetX, projOffsetY);
-          this.sentLineScaleX = projScaleX;
-          this.sentLineScaleY = projScaleY;
-          this.sentLineOffsetX = projOffsetX;
-          this.sentLineOffsetY = projOffsetY;
-        }
-        if (
-          vpMinX !== this.sentLineVpMinX ||
-          vpMinY !== this.sentLineVpMinY ||
-          vpMaxX !== this.sentLineVpMaxX ||
-          vpMaxY !== this.sentLineVpMaxY
-        ) {
-          gl.uniform4f(this.edgeLineViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
-          this.sentLineVpMinX = vpMinX;
-          this.sentLineVpMinY = vpMinY;
-          this.sentLineVpMaxX = vpMaxX;
-          this.sentLineVpMaxY = vpMaxY;
-        }
-        gl.bindVertexArray(this.edgeLineVao);
-        gl.drawArraysInstanced(gl.LINES, 0, 2, drawEdges);
-      } else {
-        gl.useProgram(this.edgeProgram);
-        if (
-          projScaleX !== this.sentEdgeScaleX ||
-          projScaleY !== this.sentEdgeScaleY ||
-          projOffsetX !== this.sentEdgeOffsetX ||
-          projOffsetY !== this.sentEdgeOffsetY
-        ) {
-          gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
-          gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
-          this.sentEdgeScaleX = projScaleX;
-          this.sentEdgeScaleY = projScaleY;
-          this.sentEdgeOffsetX = projOffsetX;
-          this.sentEdgeOffsetY = projOffsetY;
-        }
-        if (
-          vpMinX !== this.sentEdgeVpMinX ||
-          vpMinY !== this.sentEdgeVpMinY ||
-          vpMaxX !== this.sentEdgeVpMaxX ||
-          vpMaxY !== this.sentEdgeVpMaxY
-        ) {
-          gl.uniform4f(this.edgeViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
-          this.sentEdgeVpMinX = vpMinX;
-          this.sentEdgeVpMinY = vpMinY;
-          this.sentEdgeVpMaxX = vpMaxX;
-          this.sentEdgeVpMaxY = vpMaxY;
-        }
-        gl.bindVertexArray(this.edgeVao);
-        gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
+      gl.useProgram(this.edgeProgram);
+      if (
+        projScaleX !== this.sentEdgeScaleX ||
+        projScaleY !== this.sentEdgeScaleY ||
+        projOffsetX !== this.sentEdgeOffsetX ||
+        projOffsetY !== this.sentEdgeOffsetY
+      ) {
+        gl.uniform2f(this.edgeScaleLocation, projScaleX, projScaleY);
+        gl.uniform2f(this.edgeOffsetLocation, projOffsetX, projOffsetY);
+        this.sentEdgeScaleX = projScaleX;
+        this.sentEdgeScaleY = projScaleY;
+        this.sentEdgeOffsetX = projOffsetX;
+        this.sentEdgeOffsetY = projOffsetY;
       }
+      if (
+        vpMinX !== this.sentEdgeVpMinX ||
+        vpMinY !== this.sentEdgeVpMinY ||
+        vpMaxX !== this.sentEdgeVpMaxX ||
+        vpMaxY !== this.sentEdgeVpMaxY
+      ) {
+        gl.uniform4f(this.edgeViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+        this.sentEdgeVpMinX = vpMinX;
+        this.sentEdgeVpMinY = vpMinY;
+        this.sentEdgeVpMaxX = vpMaxX;
+        this.sentEdgeVpMaxY = vpMaxY;
+      }
+      gl.bindVertexArray(this.edgeVao);
+      gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
     }
 
     // Draw nodes on top of edges
