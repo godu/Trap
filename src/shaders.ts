@@ -3,17 +3,25 @@ layout(location = 0) in vec2 a_quadVertex;
 layout(location = 1) in vec2 a_position;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in float a_radius;
+layout(location = 4) in float a_iconIndex;
 
 uniform vec2 u_scale;
 uniform vec2 u_offset;
+uniform float u_minRadius;
+uniform float u_maxRadius;
 
 flat out vec4 v_color;
 out vec2 v_uv;
+flat out float v_iconIndex;
+flat out float v_worldRadius;
 
 void main() {
   v_color = a_color;
   v_uv = a_quadVertex;
-  vec2 worldPos = a_position + a_quadVertex * a_radius;
+  float radius = clamp(a_radius, u_minRadius, u_maxRadius);
+  v_iconIndex = a_iconIndex;
+  v_worldRadius = radius;
+  vec2 worldPos = a_position + a_quadVertex * radius;
   gl_Position = vec4(worldPos * u_scale + u_offset, 0.0, 1.0);
 }
 `;
@@ -23,13 +31,43 @@ precision mediump float;
 
 flat in vec4 v_color;
 in vec2 v_uv;
+flat in float v_iconIndex;
+flat in float v_worldRadius;
+
+uniform sampler2D u_iconAtlas;
+uniform float u_atlasColumns;
+uniform float u_atlasRows;
+uniform float u_iconLodRadius;
 
 out vec4 outColor;
 
 void main() {
   float dist = dot(v_uv, v_uv);
   float alpha = 1.0 - smoothstep(0.81, 1.0, dist);
-  outColor = vec4(v_color.rgb * alpha, alpha * v_color.a);
+  float a = alpha * v_color.a;
+  vec4 base = vec4(v_color.rgb * a, a);
+
+  if (v_iconIndex > 0.5 && v_worldRadius > u_iconLodRadius && u_atlasColumns > 0.0) {
+    vec2 cellUV = v_uv * 0.5 + 0.5;
+    float iconScale = 1.0;
+    vec2 iconUV = (cellUV - 0.5) / iconScale + 0.5;
+
+    if (iconUV.x >= 0.0 && iconUV.x <= 1.0 && iconUV.y >= 0.0 && iconUV.y <= 1.0) {
+      float idx = v_iconIndex - 1.0;
+      float col = mod(idx, u_atlasColumns);
+      float row = floor(idx / u_atlasColumns);
+      vec2 atlasUV = vec2(
+        (col + iconUV.x) / u_atlasColumns,
+        (row + 1.0 - iconUV.y) / u_atlasRows
+      );
+      float iconAlpha = texture(u_iconAtlas, atlasUV).a;
+      float lodFade = smoothstep(u_iconLodRadius, u_iconLodRadius * 1.5, v_worldRadius);
+      float ia = iconAlpha * a * lodFade;
+      base = vec4(base.rgb + ia, base.a);
+    }
+  }
+
+  outColor = base;
 }
 `;
 
@@ -51,12 +89,14 @@ uniform vec2 u_offset;
 uniform float u_headLength;
 uniform float u_curvature;
 uniform vec4 u_viewport;
+uniform float u_minRadius;
+uniform float u_maxRadius;
 
 flat out vec4 v_color;
 
 void main() {
-  float srcRadius = a_radii.x;
-  float tgtRadius = a_radii.y;
+  float srcRadius = clamp(a_radii.x, u_minRadius, u_maxRadius);
+  float tgtRadius = clamp(a_radii.y, u_minRadius, u_maxRadius);
 
   vec2 delta = a_target - a_source;
   float lenSq = dot(delta, delta);
