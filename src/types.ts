@@ -8,6 +8,8 @@ export interface Node {
   radius: number;
   opacity?: number;
   zIndex?: number;
+  /** Icon index (1-based) into the icon atlas. 0 or undefined = no icon. */
+  icon?: number;
 }
 
 export interface Edge {
@@ -65,4 +67,10 @@ export interface RendererOptions {
   onEdgeHoverLeave?: (event: EdgeEvent) => void;
   onBackgroundClick?: (event: BackgroundEvent) => void;
   onBackgroundDblClick?: (event: BackgroundEvent) => void;
+  /** Minimum node screen radius in CSS pixels (default: 2). */
+  minScreenRadius?: number;
+  /** Maximum node screen radius in CSS pixels (default: 40). */
+  maxScreenRadius?: number;
+  /** Minimum node screen radius in CSS pixels at which icons become visible (default: 8). */
+  iconLodRadius?: number;
 }

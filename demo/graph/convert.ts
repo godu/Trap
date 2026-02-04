@@ -1,5 +1,6 @@
 import type { Node, Edge } from "../../src/types";
 import type { GraphStep } from "./types";
+import { TYPE_ICON_INDEX } from "../icons/index";
 
 const NODE_TYPE_COLORS: Record<string, [number, number, number]> = {
   "aws:dynamodb:table": [0.29, 0.47, 0.82],
@@ -16,7 +17,9 @@ const EDGE_TYPE_COLORS: Record<string, [number, number, number, number]> = {
   escalation: [0.9, 0.25, 0.2, 0.6],
 };
 
-const DEFAULT_EDGE_COLOR: [number, number, number, number] = [0.5, 0.5, 0.5, 0.3];
+const DEFAULT_EDGE_COLOR: [number, number, number, number] = [
+  0.5, 0.5, 0.5, 0.3,
+];
 
 const DEFAULT_RADIUS = 2.0;
 const SELECTED_RADIUS = 3.0;
@@ -35,6 +38,7 @@ export function toRenderNodes(step: GraphStep): Node[] {
       b,
       radius: gNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS,
       opacity: 1.0,
+      icon: TYPE_ICON_INDEX[gNode.type] ?? 0,
     });
   }
   return nodes;

@@ -1,6 +1,7 @@
 import { Renderer } from "../src/index";
 import type { Node, Edge } from "../src/index";
 import smallResources from "./small.minimal-resources.json";
+import { ICON_SVGS, TYPE_ICON_INDEX } from "./icons/index";
 
 interface Resource {
   InternalArn: string;
@@ -38,14 +39,26 @@ const PRIVILEGE_COLORS: Record<string, [number, number, number, number]> = {
 };
 
 const DEFAULT_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
-const DEFAULT_PRIV_COLOR: [number, number, number, number] = [0.5, 0.5, 0.5, 0.3];
+const DEFAULT_PRIV_COLOR: [number, number, number, number] = [
+  0.5, 0.5, 0.5, 0.3,
+];
 
 const DIM_OPACITY = 0.12;
 
 function toNodes(data: Resource[]): Node[] {
   return data.map((res) => {
     const [r, g, b] = TYPE_COLORS[res.InternalType] ?? DEFAULT_COLOR;
-    return { id: res.InternalArn, x: res.x, y: res.y, r, g, b, radius: 2, opacity: 1.0 };
+    return {
+      id: res.InternalArn,
+      x: res.x,
+      y: res.y,
+      r,
+      g,
+      b,
+      radius: 4.0,
+      opacity: 1.0,
+      icon: TYPE_ICON_INDEX[res.InternalType] ?? 0,
+    };
   });
 }
 
@@ -54,7 +67,8 @@ function toEdges(edgeData: EdgeData[], resources: Resource[]): Edge[] {
   const edges: Edge[] = [];
   for (const e of edgeData) {
     if (!posMap.has(e.PrincipalArn) || !posMap.has(e.ResourceArn)) continue;
-    const [r, g, b, a] = PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
+    const [r, g, b, a] =
+      PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
     edges.push({
       id: `${e.PrincipalArn}->${e.ResourceArn}`,
       source: e.PrincipalArn,
@@ -73,7 +87,10 @@ function toEdges(edgeData: EdgeData[], resources: Resource[]): Edge[] {
 type Adjacency = Map<string, Set<string>>;
 type EdgesByNode = Map<string, Set<string>>;
 
-function buildAdjacency(edges: Edge[]): { adjacency: Adjacency; edgesByNode: EdgesByNode } {
+function buildAdjacency(edges: Edge[]): {
+  adjacency: Adjacency;
+  edgesByNode: EdgesByNode;
+} {
   const adjacency: Adjacency = new Map();
   const edgesByNode: EdgesByNode = new Map();
   for (const edge of edges) {
@@ -162,6 +179,7 @@ const renderer = new Renderer({
   onBackgroundClick: () => clearHighlight(),
 });
 
+renderer.setIcons(ICON_SVGS);
 renderer.render();
 
 // Load edges for initial small dataset
@@ -173,12 +191,18 @@ const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
     ]),
   medium: () =>
     Promise.all([
-      import("./medium.minimal-resources.json").then((m) => m.default as Resource[]),
-      import("./medium.minimal-edges.json").then((m) => m.default as EdgeData[]),
+      import("./medium.minimal-resources.json").then(
+        (m) => m.default as Resource[],
+      ),
+      import("./medium.minimal-edges.json").then(
+        (m) => m.default as EdgeData[],
+      ),
     ]),
   large: () =>
     Promise.all([
-      import("./large.minimal-resources.json").then((m) => m.default as Resource[]),
+      import("./large.minimal-resources.json").then(
+        (m) => m.default as Resource[],
+      ),
       import("./large.minimal-edges.json").then((m) => m.default as EdgeData[]),
     ]),
 };
@@ -195,7 +219,9 @@ document.getElementById("fit-btn")?.addEventListener("click", () => {
 });
 
 document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("button[data-dataset]");
+  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
+    "button[data-dataset]",
+  );
   if (!btn) return;
 
   const dataset = btn.dataset.dataset!;
