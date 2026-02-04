@@ -284,6 +284,7 @@ export class Renderer {
   private sentEdgeMinRadius = NaN;
   private sentEdgeMaxRadius = NaN;
   private sentEdgePxPerWorld = NaN;
+  private sentIconLodRadius = NaN;
 
   // Icon atlas state
   private iconAtlasTexture: WebGLTexture | null = null;
@@ -294,6 +295,9 @@ export class Renderer {
   private iconAtlasRowsLocation: WebGLUniformLocation | null = null;
   private iconLodRadiusLocation: WebGLUniformLocation | null = null;
   private iconLodRadius: number;
+
+  // Active GL program tracking (avoid redundant useProgram)
+  private activeProgram: WebGLProgram | null = null;
 
   // Render throttling
   private renderPending = false;
@@ -598,7 +602,7 @@ export class Renderer {
     }
     const byteLen = sorted.length * 20;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, this.nodeU8!.subarray(0, byteLen), gl.STATIC_DRAW);
     this.nodeGpuBytes = byteLen;
   }
 
@@ -817,8 +821,9 @@ export class Renderer {
     this.rebuildNodeMap(nodes);
     this.uploadNodeData(this.gl, nodes);
 
-    // Re-pack edges if we have object edges (positions changed)
-    if (this.edgeObjects.length > 0) {
+    // Re-pack edges if we have object edges (positions changed).
+    // Skip when animating — interpolateEdges will repack every frame.
+    if (this.edgeObjects.length > 0 && !shouldAnimate) {
       const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
       this.edgeCount = count;
       if (count > 0) {
@@ -931,7 +936,7 @@ export class Renderer {
     }
 
     const byteLen = target.length * 20;
-    const view = new Uint8Array(this.nodeArrayBuf!, 0, byteLen);
+    const view = this.nodeU8!.subarray(0, byteLen);
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
     if (byteLen === this.nodeGpuBytes) {
@@ -1029,24 +1034,21 @@ export class Renderer {
 
   // --- Hit testing ---
 
-  private effectiveRadius(worldRadius: number): number {
+  private hitTestNode(worldX: number, worldY: number): Node | null {
+    let closest: Node | null = null;
+    let closestDist = Infinity;
+
     const clientW = this.canvas.clientWidth || 1;
     const worldPerCssPx = (this.halfW * 2) / clientW;
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
-    return Math.max(minR, Math.min(maxR, worldRadius));
-  }
-
-  private hitTestNode(worldX: number, worldY: number): Node | null {
-    let closest: Node | null = null;
-    let closestDist = Infinity;
 
     for (let i = 0; i < this.nodes.length; i++) {
       const node = this.nodes[i];
       const dx = worldX - node.x;
       const dy = worldY - node.y;
       const distSq = dx * dx + dy * dy;
-      const r = this.effectiveRadius(node.radius);
+      const r = Math.max(minR, Math.min(maxR, node.radius));
       const rSq = r * r;
       if (distSq < rSq && distSq < closestDist) {
         closestDist = distSq;
@@ -1536,6 +1538,13 @@ export class Renderer {
     }
   }
 
+  private useProgram(program: WebGLProgram): void {
+    if (program !== this.activeProgram) {
+      this.gl.useProgram(program);
+      this.activeProgram = program;
+    }
+  }
+
   private updateProjection(): void {
     this.projScaleX = 1 / this.halfW;
     this.projScaleY = 1 / this.halfH;
@@ -1602,7 +1611,7 @@ export class Renderer {
       const vpMinY = this.vpMinY;
       const vpMaxX = this.vpMaxX;
       const vpMaxY = this.vpMaxY;
-      gl.useProgram(this.edgeProgram);
+      this.useProgram(this.edgeProgram);
       if (
         projScaleX !== this.sentEdgeScaleX ||
         projScaleY !== this.sentEdgeScaleY ||
@@ -1644,7 +1653,7 @@ export class Renderer {
     }
 
     // Draw nodes on top of edges
-    gl.useProgram(this.program);
+    this.useProgram(this.program);
     if (
       projScaleX !== this.sentNodeScaleX ||
       projScaleY !== this.sentNodeScaleY ||
@@ -1669,7 +1678,11 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
     }
-    gl.uniform1f(this.iconLodRadiusLocation!, this.iconLodRadius * worldPerCssPx);
+    const lodRadius = this.iconLodRadius * worldPerCssPx;
+    if (lodRadius !== this.sentIconLodRadius) {
+      gl.uniform1f(this.iconLodRadiusLocation!, lodRadius);
+      this.sentIconLodRadius = lodRadius;
+    }
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
