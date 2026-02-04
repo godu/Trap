@@ -48,23 +48,18 @@ void main() {
   vec4 base = vec4(v_color.rgb * a, a);
 
   if (v_iconIndex > 0.5 && v_worldRadius > u_iconLodRadius && u_atlasColumns > 0.0) {
-    vec2 cellUV = v_uv * 0.5 + 0.5;
-    float iconScale = 1.0;
-    vec2 iconUV = (cellUV - 0.5) / iconScale + 0.5;
-
-    if (iconUV.x >= 0.0 && iconUV.x <= 1.0 && iconUV.y >= 0.0 && iconUV.y <= 1.0) {
-      float idx = v_iconIndex - 1.0;
-      float col = mod(idx, u_atlasColumns);
-      float row = floor(idx / u_atlasColumns);
-      vec2 atlasUV = vec2(
-        (col + iconUV.x) / u_atlasColumns,
-        (row + 1.0 - iconUV.y) / u_atlasRows
-      );
-      float iconAlpha = texture(u_iconAtlas, atlasUV).a;
-      float lodFade = smoothstep(u_iconLodRadius, u_iconLodRadius * 1.5, v_worldRadius);
-      float ia = iconAlpha * a * lodFade;
-      base = vec4(base.rgb + ia, base.a);
-    }
+    vec2 iconUV = v_uv * 0.5 + 0.5;
+    float idx = v_iconIndex - 1.0;
+    float col = mod(idx, u_atlasColumns);
+    float row = floor(idx / u_atlasColumns);
+    vec2 atlasUV = vec2(
+      (col + iconUV.x) / u_atlasColumns,
+      (row + 1.0 - iconUV.y) / u_atlasRows
+    );
+    float iconAlpha = texture(u_iconAtlas, atlasUV).a;
+    float lodFade = smoothstep(u_iconLodRadius, u_iconLodRadius * 1.5, v_worldRadius);
+    float ia = iconAlpha * a * lodFade;
+    base = vec4(base.rgb + ia, base.a);
   }
 
   outColor = base;

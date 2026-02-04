@@ -296,8 +296,9 @@ export class Renderer {
   private iconLodRadiusLocation: WebGLUniformLocation | null = null;
   private iconLodRadius: number;
 
-  // Active GL program tracking (avoid redundant useProgram)
+  // Active GL state tracking (avoid redundant useProgram/bindVertexArray)
   private activeProgram: WebGLProgram | null = null;
+  private activeVao: WebGLVertexArrayObject | null = null;
 
   // Render throttling
   private renderPending = false;
@@ -360,6 +361,10 @@ export class Renderer {
   // Reusable Map + object pool for interpolateEdges
   private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
   private interpNodePool: { x: number; y: number; radius: number }[] = [];
+
+  // Reusable sort scratch arrays (avoid .slice() allocation per upload)
+  private nodeSortBuf: Node[] = [];
+  private edgeSortBuf: Edge[] = [];
 
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
   private edgeBufferCapacity = 0;
@@ -582,7 +587,11 @@ export class Renderer {
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
     // Sort by zIndex for draw ordering (lower zIndex draws first = behind)
-    const sorted = nodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    // Reuse scratch array to avoid allocation
+    const sorted = this.nodeSortBuf;
+    sorted.length = nodes.length;
+    for (let i = 0; i < nodes.length; i++) sorted[i] = nodes[i];
+    sorted.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureNodeBuffer(sorted.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
@@ -707,7 +716,11 @@ export class Renderer {
     buffer: Uint8Array;
     count: number;
   } {
-    const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    // Reuse scratch array to avoid allocation
+    const sorted = this.edgeSortBuf;
+    sorted.length = edges.length;
+    for (let i = 0; i < edges.length; i++) sorted[i] = edges[i];
+    sorted.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureEdgeBuffer(sorted.length);
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
@@ -1545,6 +1558,13 @@ export class Renderer {
     }
   }
 
+  private bindVao(vao: WebGLVertexArrayObject): void {
+    if (vao !== this.activeVao) {
+      this.gl.bindVertexArray(vao);
+      this.activeVao = vao;
+    }
+  }
+
   private updateProjection(): void {
     this.projScaleX = 1 / this.halfW;
     this.projScaleY = 1 / this.halfH;
@@ -1648,7 +1668,7 @@ export class Renderer {
         gl.uniform1f(this.edgePxPerWorldLocation, pxPerWorld);
         this.sentEdgePxPerWorld = pxPerWorld;
       }
-      gl.bindVertexArray(this.edgeVao);
+      this.bindVao(this.edgeVao);
       gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
     }
 
@@ -1683,7 +1703,7 @@ export class Renderer {
       gl.uniform1f(this.iconLodRadiusLocation!, lodRadius);
       this.sentIconLodRadius = lodRadius;
     }
-    gl.bindVertexArray(this.vao);
+    this.bindVao(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
 
