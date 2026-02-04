@@ -1,34 +1,20 @@
 import type { Node, Edge } from "../../src/types";
 import type { GraphStep } from "./types";
 import { TYPE_ICON_INDEX } from "../icons/index";
-
-const NODE_TYPE_COLORS: Record<string, [number, number, number]> = {
-  "aws:dynamodb:table": [0.29, 0.47, 0.82],
-  "aws:ec2:instance": [0.95, 0.77, 0.06],
-  "aws:iam:role": [0.86, 0.21, 0.27],
-  "aws:iam:user": [0.72, 0.15, 0.22],
-  "aws:lambda:function": [0.95, 0.61, 0.07],
-};
-
-const DEFAULT_NODE_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
-
-const EDGE_TYPE_COLORS: Record<string, [number, number, number, number]> = {
-  privilege: [0.3, 0.55, 0.75, 0.4],
-  escalation: [0.9, 0.25, 0.2, 0.6],
-};
-
-const DEFAULT_EDGE_COLOR: [number, number, number, number] = [
-  0.5, 0.5, 0.5, 0.3,
-];
-
-const DEFAULT_RADIUS = 2.0;
-const SELECTED_RADIUS = 3.0;
+import {
+  TYPE_COLORS,
+  DEFAULT_NODE_COLOR,
+  EDGE_TYPE_COLORS,
+  DEFAULT_EDGE_COLOR,
+  NODE_RADIUS,
+  SELECTED_NODE_RADIUS,
+} from "../settings";
 
 /** Convert a GraphStep's nodes to renderer Node[] with ids. */
 export function toRenderNodes(step: GraphStep): Node[] {
   const nodes: Node[] = [];
   for (const [id, gNode] of step.nodes) {
-    const [r, g, b] = NODE_TYPE_COLORS[gNode.type] ?? DEFAULT_NODE_COLOR;
+    const [r, g, b] = TYPE_COLORS[gNode.type] ?? DEFAULT_NODE_COLOR;
     nodes.push({
       id,
       x: gNode.x,
@@ -36,7 +22,7 @@ export function toRenderNodes(step: GraphStep): Node[] {
       r,
       g,
       b,
-      radius: gNode.selected ? SELECTED_RADIUS : DEFAULT_RADIUS,
+      radius: gNode.selected ? SELECTED_NODE_RADIUS : NODE_RADIUS,
       opacity: 1.0,
       icon: TYPE_ICON_INDEX[gNode.type] ?? 0,
     });

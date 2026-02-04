@@ -2,6 +2,14 @@ import { Renderer } from "../src/index";
 import type { Node, Edge } from "../src/index";
 import smallResources from "./small.minimal-resources.json";
 import { ICON_SVGS, TYPE_ICON_INDEX } from "./icons/index";
+import {
+  TYPE_COLORS,
+  DEFAULT_NODE_COLOR,
+  EDGE_TYPE_COLORS,
+  DEFAULT_EDGE_COLOR,
+  NODE_RADIUS,
+  DIM_OPACITY,
+} from "./settings";
 
 interface Resource {
   InternalArn: string;
@@ -18,36 +26,9 @@ interface EdgeData {
   HasPrivileges: string;
 }
 
-const TYPE_COLORS: Record<string, [number, number, number]> = {
-  "aws:cloudformation:stack": [0.98, 0.51, 0.25],
-  "aws:dynamodb:table": [0.29, 0.47, 0.82],
-  "aws:ec2:instance": [0.95, 0.77, 0.06],
-  "aws:ecs:task-definition": [0.95, 0.49, 0.13],
-  "aws:iam:oidc-provider": [0.86, 0.21, 0.27],
-  "aws:iam:role": [0.86, 0.21, 0.27],
-  "aws:iam:saml-provider": [0.86, 0.21, 0.27],
-  "aws:iam:user": [0.72, 0.15, 0.22],
-  "aws:kms:key": [0.62, 0.31, 0.71],
-  "aws:lambda:function": [0.95, 0.61, 0.07],
-  "aws:s3:bucket": [0.22, 0.66, 0.36],
-  "aws:sqs:queue": [0.95, 0.35, 0.53],
-};
-
-const PRIVILEGE_COLORS: Record<string, [number, number, number, number]> = {
-  Direct: [0.3, 0.55, 0.75, 0.4],
-  Escalation: [0.9, 0.25, 0.2, 0.6],
-};
-
-const DEFAULT_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
-const DEFAULT_PRIV_COLOR: [number, number, number, number] = [
-  0.5, 0.5, 0.5, 0.3,
-];
-
-const DIM_OPACITY = 0.12;
-
 function toNodes(data: Resource[]): Node[] {
   return data.map((res) => {
-    const [r, g, b] = TYPE_COLORS[res.InternalType] ?? DEFAULT_COLOR;
+    const [r, g, b] = TYPE_COLORS[res.InternalType] ?? DEFAULT_NODE_COLOR;
     return {
       id: res.InternalArn,
       x: res.x,
@@ -55,7 +36,7 @@ function toNodes(data: Resource[]): Node[] {
       r,
       g,
       b,
-      radius: 4.0,
+      radius: NODE_RADIUS,
       opacity: 1.0,
       icon: TYPE_ICON_INDEX[res.InternalType] ?? 0,
     };
@@ -68,7 +49,7 @@ function toEdges(edgeData: EdgeData[], resources: Resource[]): Edge[] {
   for (const e of edgeData) {
     if (!posMap.has(e.PrincipalArn) || !posMap.has(e.ResourceArn)) continue;
     const [r, g, b, a] =
-      PRIVILEGE_COLORS[e.HasPrivileges] ?? DEFAULT_PRIV_COLOR;
+      EDGE_TYPE_COLORS[e.HasPrivileges] ?? DEFAULT_EDGE_COLOR;
     edges.push({
       id: `${e.PrincipalArn}->${e.ResourceArn}`,
       source: e.PrincipalArn,
@@ -137,7 +118,7 @@ function highlightNode(nodeId: string) {
 
   const dimmedEdges = currentEdges.map((e) => ({
     ...e,
-    a: connectedEdges.has(e.id) ? e.a : e.a * DIM_OPACITY,
+    a: connectedEdges.has(e.id) ? e.a : DIM_OPACITY,
   }));
 
   renderer.setNodes(dimmedNodes);
@@ -157,7 +138,7 @@ function highlightEdge(edgeId: string) {
 
   const dimmedEdges = currentEdges.map((e) => ({
     ...e,
-    a: e.id === edgeId ? e.a : e.a * DIM_OPACITY,
+    a: e.id === edgeId ? 1.0 : e.a * DIM_OPACITY,
   }));
 
   renderer.setNodes(dimmedNodes);

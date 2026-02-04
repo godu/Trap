@@ -9,8 +9,9 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        main: resolve(__dirname, "demo/index.html"),
-        escalation: resolve(__dirname, "demo/escalation.html"),
+        index: resolve(__dirname, "demo/index.html"),
+        transition: resolve(__dirname, "demo/transition.html"),
+        scenario: resolve(__dirname, "demo/scenario.html"),
       },
     },
   },
