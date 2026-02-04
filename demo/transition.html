@@ -64,6 +64,17 @@
         width: 100%;
         min-height: 0;
       }
+      #event-info {
+        position: fixed;
+        bottom: 8px;
+        left: 8px;
+        padding: 4px 8px;
+        background: rgba(0, 0, 0, 0.6);
+        color: rgba(255, 255, 255, 0.7);
+        font: 12px/1.2 monospace;
+        border-radius: 4px;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
@@ -76,6 +87,7 @@
       <button id="fit-btn">Fit</button>
     </header>
     <canvas id="canvas"></canvas>
+    <div id="event-info"></div>
     <script type="module" src="./escalation.ts"></script>
   </body>
 </html>
