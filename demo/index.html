@@ -2,80 +2,72 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Demos</title>
     <style>
       * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
       }
-      html,
       body {
-        overflow: hidden;
         background: #111;
+        color: #eee;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 48px;
       }
-      body {
-        position: fixed;
-        inset: 0;
+      h1 {
+        font-size: 20px;
+        font-weight: 500;
+        margin-bottom: 24px;
+        color: rgba(255, 255, 255, 0.7);
+      }
+      ul {
+        list-style: none;
         display: flex;
         flex-direction: column;
+        gap: 8px;
       }
-      header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 12px;
-        background: rgba(255, 255, 255, 0.06);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        flex-shrink: 0;
-      }
-      .toggle-group {
-        display: flex;
-        gap: 2px;
-        background: rgba(255, 255, 255, 0.08);
-        border-radius: 6px;
-        padding: 2px;
-      }
-      .toggle-group button {
-        padding: 4px 12px;
-        background: none;
-        color: rgba(255, 255, 255, 0.5);
-        border: none;
-        border-radius: 4px;
-        font: 13px/1 system-ui, sans-serif;
-        cursor: pointer;
-      }
-      .toggle-group button[aria-pressed="true"] {
-        background: rgba(255, 255, 255, 0.15);
-        color: #eee;
-      }
-      #fit-btn {
-        padding: 4px 12px;
-        background: rgba(255, 255, 255, 0.08);
-        color: rgba(255, 255, 255, 0.7);
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        border-radius: 6px;
-        font: 13px/1 system-ui, sans-serif;
-        cursor: pointer;
-      }
-      canvas {
+      a {
         display: block;
-        flex: 1;
-        width: 100%;
-        min-height: 0;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        color: #ccc;
+        text-decoration: none;
+        transition: background 0.15s;
+      }
+      a:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .desc {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 13px;
       }
     </style>
   </head>
   <body>
-    <header>
-      <div class="toggle-group" id="dataset-toggle">
-        <button data-dataset="small" aria-pressed="true">Small</button>
-        <button data-dataset="medium" aria-pressed="false">Medium</button>
-        <button data-dataset="large" aria-pressed="false">Large</button>
-      </div>
-      <button id="fit-btn">Fit</button>
-    </header>
-    <canvas id="canvas"></canvas>
-    <script type="module" src="./main.ts"></script>
+    <h1>Demos</h1>
+    <ul>
+      <li>
+        <a href="transition.html">
+          Transition
+          <span class="desc"
+            >Step-by-step privilege escalation walkthrough</span
+          >
+        </a>
+      </li>
+      <li>
+        <a href="scenario.html">
+          Scenario
+          <span class="desc"
+            >Dataset size toggle with animated transitions</span
+          >
+        </a>
+      </li>
+    </ul>
   </body>
 </html>

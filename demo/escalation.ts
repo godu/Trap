@@ -1,6 +1,7 @@
 import { Renderer } from "../src/index";
 import { toRenderNodes, toEdges } from "./graph/convert";
 import type { GraphStep } from "./graph/types";
+import { ICON_SVGS } from "./icons/index";
 import {
   FIRST_STEP_NODES,
   FIRST_STEP_EDGES,
@@ -22,6 +23,7 @@ const initialNodes = toRenderNodes(steps[0]);
 const initialEdges = toEdges(steps[0]);
 
 const renderer = new Renderer({ canvas, nodes: initialNodes, edges: initialEdges });
+renderer.setIcons(ICON_SVGS);
 renderer.render();
 renderer.fitToNodes(0);
 

@@ -103,9 +103,9 @@ describe("toRenderNodes", () => {
     ]);
     const nodes = toRenderNodes(step);
 
-    expect(nodes[0].radius).toBe(3.0);
-    expect(nodes[1].radius).toBe(2.0);
-    expect(nodes[2].radius).toBe(2.0);
+    expect(nodes[0].radius).toBe(5.0);
+    expect(nodes[1].radius).toBe(4.0);
+    expect(nodes[2].radius).toBe(4.0);
   });
 });
 
@@ -116,7 +116,7 @@ describe("toEdges", () => {
         ["a", "aws:iam:role", 10, 20],
         ["b", "aws:ec2:instance", 30, 40],
       ],
-      [["a", "b", "privilege"]],
+      [["a", "b", "Direct"]],
     );
     const edges = toEdges(step);
     expect(edges).toHaveLength(1);
@@ -128,7 +128,7 @@ describe("toEdges", () => {
         ["a", "test", 0, 0],
         ["b", "test", 1, 1],
       ],
-      [["a", "b", "privilege"]],
+      [["a", "b", "Direct"]],
     );
     const edges = toEdges(step);
     expect(edges[0].id).toBe("a->b");
@@ -140,51 +140,51 @@ describe("toEdges", () => {
         ["a", "test", 0, 0],
         ["b", "test", 1, 1],
       ],
-      [["a", "b", "privilege"]],
+      [["a", "b", "Direct"]],
     );
     const edges = toEdges(step);
     expect(edges[0].source).toBe("a");
     expect(edges[0].target).toBe("b");
   });
 
-  it("maps privilege edges to correct RGBA", () => {
+  it("maps Direct edges to correct RGBA", () => {
     const step = makeStep(
       [
         ["a", "test", 0, 0],
         ["b", "test", 1, 1],
       ],
-      [["a", "b", "privilege"]],
+      [["a", "b", "Direct"]],
     );
     const edges = toEdges(step);
     expect(edges[0].r).toBeCloseTo(0.3);
     expect(edges[0].g).toBeCloseTo(0.55);
     expect(edges[0].b).toBeCloseTo(0.75);
-    expect(edges[0].a).toBeCloseTo(0.4);
+    expect(edges[0].a).toBeCloseTo(0.6);
   });
 
-  it("maps escalation edges to correct RGBA", () => {
+  it("maps Escalation edges to correct RGBA", () => {
     const step = makeStep(
       [
         ["a", "test", 0, 0],
         ["b", "test", 1, 1],
       ],
-      [["a", "b", "escalation"]],
+      [["a", "b", "Escalation"]],
     );
     const edges = toEdges(step);
     expect(edges[0].r).toBeCloseTo(0.9);
     expect(edges[0].g).toBeCloseTo(0.25);
     expect(edges[0].b).toBeCloseTo(0.2);
-    expect(edges[0].a).toBeCloseTo(0.6);
+    expect(edges[0].a).toBeCloseTo(0.8);
   });
 
   it("skips edges with missing source node", () => {
-    const step = makeStep([["b", "test", 1, 1]], [["a", "b", "privilege"]]);
+    const step = makeStep([["b", "test", 1, 1]], [["a", "b", "Direct"]]);
     const edges = toEdges(step);
     expect(edges).toHaveLength(0);
   });
 
   it("skips edges with missing target node", () => {
-    const step = makeStep([["a", "test", 1, 1]], [["a", "b", "privilege"]]);
+    const step = makeStep([["a", "test", 1, 1]], [["a", "b", "Direct"]]);
     const edges = toEdges(step);
     expect(edges).toHaveLength(0);
   });
@@ -197,9 +197,9 @@ describe("toEdges", () => {
         ["c", "test", 20, 20],
       ],
       [
-        ["a", "b", "privilege"],
+        ["a", "b", "Direct"],
         ["a", "c", "escalation"],
-        ["b", "c", "privilege"],
+        ["b", "c", "Direct"],
       ],
     );
     const edges = toEdges(step);
