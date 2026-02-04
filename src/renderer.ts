@@ -300,6 +300,7 @@ export class Renderer {
   private edgeViewportLocation: WebGLUniformLocation;
   private edgeMinRadiusLocation: WebGLUniformLocation;
   private edgeMaxRadiusLocation: WebGLUniformLocation;
+  private edgePxPerWorldLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
@@ -359,6 +360,7 @@ export class Renderer {
   private sentMaxRadius = NaN;
   private sentEdgeMinRadius = NaN;
   private sentEdgeMaxRadius = NaN;
+  private sentEdgePxPerWorld = NaN;
 
   // Icon atlas state
   private iconAtlasTexture: WebGLTexture | null = null;
@@ -524,6 +526,7 @@ export class Renderer {
 
     this.edgeMinRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_minRadius")!;
     this.edgeMaxRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_maxRadius")!;
+    this.edgePxPerWorldLocation = gl.getUniformLocation(this.edgeProgram, "u_pxPerWorld")!;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
 
@@ -1780,6 +1783,11 @@ export class Renderer {
         gl.uniform1f(this.edgeMaxRadiusLocation, maxR);
         this.sentEdgeMinRadius = minR;
         this.sentEdgeMaxRadius = maxR;
+      }
+      const pxPerWorld = projScaleX * this.canvas.width * 0.5;
+      if (pxPerWorld !== this.sentEdgePxPerWorld) {
+        gl.uniform1f(this.edgePxPerWorldLocation, pxPerWorld);
+        this.sentEdgePxPerWorld = pxPerWorld;
       }
       gl.bindVertexArray(this.edgeVao);
       gl.drawElementsInstanced(
