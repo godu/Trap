@@ -151,13 +151,35 @@ function clearHighlight() {
 }
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const eventInfo = document.getElementById("event-info")!;
+
+function showEvent(type: string, target: string, id?: string) {
+  eventInfo.textContent = id ? `${type} ${target} ${id}` : `${type} ${target}`;
+}
+
 const renderer = new Renderer({
   canvas,
   nodes: currentNodes,
   animationDuration: 300,
-  onNodeClick: (e) => highlightNode(e.nodeId),
-  onEdgeClick: (e) => highlightEdge(e.edgeId),
-  onBackgroundClick: () => clearHighlight(),
+  onNodeClick: (e) => {
+    showEvent(e.type, "node", e.nodeId);
+    highlightNode(e.nodeId);
+  },
+  onNodeDblClick: (e) => showEvent(e.type, "node", e.nodeId),
+  onNodeHoverEnter: (e) => showEvent(e.type, "node", e.nodeId),
+  onNodeHoverLeave: (e) => showEvent(e.type, "node", e.nodeId),
+  onEdgeClick: (e) => {
+    showEvent(e.type, "edge", e.edgeId);
+    highlightEdge(e.edgeId);
+  },
+  onEdgeDblClick: (e) => showEvent(e.type, "edge", e.edgeId),
+  onEdgeHoverEnter: (e) => showEvent(e.type, "edge", e.edgeId),
+  onEdgeHoverLeave: (e) => showEvent(e.type, "edge", e.edgeId),
+  onBackgroundClick: (e) => {
+    showEvent(e.type, "background");
+    clearHighlight();
+  },
+  onBackgroundDblClick: (e) => showEvent(e.type, "background"),
 });
 
 renderer.setIcons(ICON_SVGS);
