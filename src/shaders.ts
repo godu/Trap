@@ -208,4 +208,3 @@ void main() {
   outColor = v_color * aa;
 }
 `;
-

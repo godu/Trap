@@ -208,7 +208,9 @@ describe("Rendering", () => {
       let clickedNode: string | null = null;
       renderer = createTestRenderer(canvas, nodes, {
         maxScreenRadius: 20,
-        onNodeClick: (e) => { clickedNode = e.nodeId; },
+        onNodeClick: (e) => {
+          clickedNode = e.nodeId;
+        },
       });
       renderer.fitToNodes(0);
       renderer.render();
