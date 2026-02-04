@@ -1,4 +1,5 @@
 export { Renderer, sampleBezier } from "./renderer";
+export { buildIconAtlas } from "./atlas";
 export {
   computeBounds,
   computeFitView,

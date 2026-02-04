@@ -9,6 +9,7 @@ import {
   nodeScreenPos,
   threeNodeGraph,
   singleNodeGraph,
+  simulateClick,
 } from "./helpers";
 import type { Renderer } from "../../src/index";
 
@@ -164,6 +165,62 @@ describe("Rendering", () => {
       const midY = (posA.y + posC.y) / 2;
 
       assertIsBackground(canvas, midX, midY);
+    });
+  });
+
+  describe("radius clamping", () => {
+    it("clamps large world radius to maxScreenRadius", () => {
+      canvas = createTestCanvas();
+      // Single node with a huge world radius
+      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 500 }];
+      // maxScreenRadius = 20px → node should not fill the whole canvas
+      renderer = createTestRenderer(canvas, nodes, { maxScreenRadius: 20 });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      // 80px from center should be background (node clamped to ~20 CSS px radius)
+      assertIsBackground(canvas, 200 + 80, 200);
+    });
+
+    it("clamps small world radius to minScreenRadius", () => {
+      canvas = createTestCanvas();
+      // Two widely-spaced tiny nodes — fitToNodes will zoom way out
+      const nodes = [
+        { id: "a", x: -1000, y: 0, r: 1, g: 0, b: 0, radius: 0.1 },
+        { id: "b", x: 1000, y: 0, r: 0, g: 1, b: 0, radius: 0.1 },
+      ];
+      // minScreenRadius = 4px → nodes should still be visible at center
+      renderer = createTestRenderer(canvas, nodes, { minScreenRadius: 4 });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      // Node centers should still be non-background despite tiny world radius
+      const posA = nodeScreenPos(nodes[0], nodes, canvas);
+      const posB = nodeScreenPos(nodes[1], nodes, canvas);
+      assertNotBackground(canvas, posA.x, posA.y);
+      assertNotBackground(canvas, posB.x, posB.y);
+    });
+
+    it("hit test respects clamped radius", () => {
+      canvas = createTestCanvas();
+      // Single node with huge world radius, but clamped to 20px max
+      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 500 }];
+      let clickedNode: string | null = null;
+      renderer = createTestRenderer(canvas, nodes, {
+        maxScreenRadius: 20,
+        onNodeClick: (e) => { clickedNode = e.nodeId; },
+      });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      // Click at center → should hit the node
+      simulateClick(canvas, 200, 200);
+      expect(clickedNode).toBe("big");
+
+      // Click far outside clamped radius → should miss
+      clickedNode = null;
+      simulateClick(canvas, 200 + 80, 200);
+      expect(clickedNode).toBeNull();
     });
   });
 });

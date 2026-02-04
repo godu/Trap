@@ -1,4 +1,11 @@
-import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent } from "./types";
+import type {
+  Node,
+  Edge,
+  RendererOptions,
+  NodeEvent,
+  EdgeEvent,
+  BackgroundEvent,
+} from "./types";
 import {
   vertexSource,
   fragmentSource,
@@ -6,8 +13,13 @@ import {
   edgeFragmentSource,
 } from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
+import { buildIconAtlas } from "./atlas";
 
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
+function compileShader(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("Failed to create shader");
   gl.shaderSource(shader, source);
@@ -212,7 +224,11 @@ function ensureShuffleBuffers(count: number): void {
 }
 
 /** Fisher-Yates shuffle of edge buffer within zIndex groups (EDGE_STRIDE bytes per record). */
-function shuffleEdgeBuffer(buf: Uint8Array, count: number, groupSizes?: number[]): Uint8Array {
+function shuffleEdgeBuffer(
+  buf: Uint8Array,
+  count: number,
+  groupSizes?: number[],
+): Uint8Array {
   ensureShuffleBuffers(count);
 
   if (!groupSizes || groupSizes.length <= 1) {
@@ -225,7 +241,10 @@ function shuffleEdgeBuffer(buf: Uint8Array, count: number, groupSizes?: number[]
     }
     for (let i = 0; i < count; i++) {
       const srcOff = shuffleIndices[i] * EDGE_STRIDE;
-      shuffleOutput.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), i * EDGE_STRIDE);
+      shuffleOutput.set(
+        buf.subarray(srcOff, srcOff + EDGE_STRIDE),
+        i * EDGE_STRIDE,
+      );
     }
     return shuffleOutput.subarray(0, count * EDGE_STRIDE);
   }
@@ -242,7 +261,10 @@ function shuffleEdgeBuffer(buf: Uint8Array, count: number, groupSizes?: number[]
     }
     for (let i = 0; i < size; i++) {
       const srcOff = shuffleIndices[i] * EDGE_STRIDE;
-      shuffleOutput.set(buf.subarray(srcOff, srcOff + EDGE_STRIDE), (offset + i) * EDGE_STRIDE);
+      shuffleOutput.set(
+        buf.subarray(srcOff, srcOff + EDGE_STRIDE),
+        (offset + i) * EDGE_STRIDE,
+      );
     }
     offset += size;
   }
@@ -257,6 +279,8 @@ export class Renderer {
   private nodeCount: number;
   private scaleLocation: WebGLUniformLocation;
   private offsetLocation: WebGLUniformLocation;
+  private nodeMinRadiusLocation: WebGLUniformLocation;
+  private nodeMaxRadiusLocation: WebGLUniformLocation;
   private nodes: Node[];
   private nodeInstanceBuffer!: WebGLBuffer;
 
@@ -274,6 +298,8 @@ export class Renderer {
   private edgeHeadLenLocation: WebGLUniformLocation;
   private edgeCurvatureLocation: WebGLUniformLocation;
   private edgeViewportLocation: WebGLUniformLocation;
+  private edgeMinRadiusLocation: WebGLUniformLocation;
+  private edgeMaxRadiusLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
@@ -326,6 +352,24 @@ export class Renderer {
   private sentEdgeVpMinY = NaN;
   private sentEdgeVpMaxX = NaN;
   private sentEdgeVpMaxY = NaN;
+  // Radius clamping
+  private minScreenRadius: number;
+  private maxScreenRadius: number;
+  private sentMinRadius = NaN;
+  private sentMaxRadius = NaN;
+  private sentEdgeMinRadius = NaN;
+  private sentEdgeMaxRadius = NaN;
+
+  // Icon atlas state
+  private iconAtlasTexture: WebGLTexture | null = null;
+  private iconAtlasColumns = 0;
+  private iconAtlasRows = 0;
+  private iconAtlasLocation: WebGLUniformLocation | null = null;
+  private iconAtlasColsLocation: WebGLUniformLocation | null = null;
+  private iconAtlasRowsLocation: WebGLUniformLocation | null = null;
+  private iconLodRadiusLocation: WebGLUniformLocation | null = null;
+  private iconLodRadius: number;
+
   // Render throttling
   private renderPending = false;
 
@@ -385,7 +429,10 @@ export class Renderer {
   private edgeGpuBytes = 0;
 
   // Reusable Map + object pool for interpolateEdges
-  private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
+  private interpNodeMap = new Map<
+    string,
+    { x: number; y: number; radius: number }
+  >();
   private interpNodePool: { x: number; y: number; radius: number }[] = [];
 
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
@@ -421,6 +468,9 @@ export class Renderer {
       this.dataAnimEasing = options.animationEasing;
     }
 
+    this.minScreenRadius = options.minScreenRadius ?? 2;
+    this.maxScreenRadius = options.maxScreenRadius ?? 40;
+
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
       alpha: false,
@@ -440,6 +490,14 @@ export class Renderer {
     this.scaleLocation = sLoc;
     this.offsetLocation = oLoc;
 
+    this.nodeMinRadiusLocation = gl.getUniformLocation(this.program, "u_minRadius")!;
+    this.nodeMaxRadiusLocation = gl.getUniformLocation(this.program, "u_maxRadius")!;
+    this.iconAtlasLocation = gl.getUniformLocation(this.program, "u_iconAtlas");
+    this.iconAtlasColsLocation = gl.getUniformLocation(this.program, "u_atlasColumns");
+    this.iconAtlasRowsLocation = gl.getUniformLocation(this.program, "u_atlasRows");
+    this.iconLodRadiusLocation = gl.getUniformLocation(this.program, "u_iconLodRadius");
+    this.iconLodRadius = options.iconLodRadius ?? 8;
+
     this.vao = this.setupGeometry(gl, options.nodes);
 
     // Edge program
@@ -447,7 +505,8 @@ export class Renderer {
 
     const esLoc = gl.getUniformLocation(this.edgeProgram, "u_scale");
     const eoLoc = gl.getUniformLocation(this.edgeProgram, "u_offset");
-    if (!esLoc || !eoLoc) throw new Error("u_scale/u_offset not found in edge program");
+    if (!esLoc || !eoLoc)
+      throw new Error("u_scale/u_offset not found in edge program");
     this.edgeScaleLocation = esLoc;
     this.edgeOffsetLocation = eoLoc;
 
@@ -462,6 +521,9 @@ export class Renderer {
     const eVpLoc = gl.getUniformLocation(this.edgeProgram, "u_viewport");
     if (!eVpLoc) throw new Error("u_viewport not found");
     this.edgeViewportLocation = eVpLoc;
+
+    this.edgeMinRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_minRadius")!;
+    this.edgeMaxRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_maxRadius")!;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
 
@@ -515,7 +577,10 @@ export class Renderer {
     this.halfH = view.halfH;
   }
 
-  private setupGeometry(gl: WebGL2RenderingContext, nodes: Node[]): WebGLVertexArrayObject {
+  private setupGeometry(
+    gl: WebGL2RenderingContext,
+    nodes: Node[],
+  ): WebGLVertexArrayObject {
     const vao = gl.createVertexArray();
     if (!vao) throw new Error("Failed to create VAO");
     gl.bindVertexArray(vao);
@@ -538,8 +603,8 @@ export class Renderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
     // Single interleaved instance buffer
-    // Per node: [x(f32), y(f32), rgba(4×u8), radius(f32)] = 16 bytes
-    const NODE_STRIDE = 16;
+    // Per node: [x(f32), y(f32), rgba(4×u8), radius(f32), iconIndex(f32)] = 20 bytes
+    const NODE_STRIDE = 20;
     const instanceBuf = gl.createBuffer();
     if (!instanceBuf) throw new Error("Failed to create buffer");
     this.nodeInstanceBuffer = instanceBuf;
@@ -560,6 +625,11 @@ export class Renderer {
     gl.vertexAttribPointer(3, 1, gl.FLOAT, false, NODE_STRIDE, 12);
     gl.vertexAttribDivisor(3, 1);
 
+    // a_iconIndex (float) at byte offset 16
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 1, gl.FLOAT, false, NODE_STRIDE, 16);
+    gl.vertexAttribDivisor(4, 1);
+
     gl.bindVertexArray(null);
 
     this.uploadNodeData(gl, nodes);
@@ -570,7 +640,7 @@ export class Renderer {
     if (count <= this.nodeBufferCapacity) return;
     let cap = this.nodeBufferCapacity || 64;
     while (cap < count) cap *= 2;
-    this.nodeArrayBuf = new ArrayBuffer(cap * 16);
+    this.nodeArrayBuf = new ArrayBuffer(cap * 20);
     this.nodeF32 = new Float32Array(this.nodeArrayBuf);
     this.nodeU8 = new Uint8Array(this.nodeArrayBuf);
     this.nodeBufferCapacity = cap;
@@ -589,14 +659,16 @@ export class Renderer {
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
     // Sort by zIndex for draw ordering (lower zIndex draws first = behind)
-    const sorted = nodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const sorted = nodes
+      .slice()
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureNodeBuffer(sorted.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
     for (let i = 0; i < sorted.length; i++) {
       const node = sorted[i];
-      const fi = i * 4; // float index (16 bytes / 4)
-      const bi = i * 16; // byte index
+      const fi = i * 5; // float index (20 bytes / 4)
+      const bi = i * 20; // byte index
       f32[fi] = node.x;
       f32[fi + 1] = node.y;
       const opacity = node.opacity ?? 1.0;
@@ -605,14 +677,21 @@ export class Renderer {
       u8[bi + 10] = (node.b * 255 + 0.5) | 0;
       u8[bi + 11] = (opacity * 255 + 0.5) | 0;
       f32[fi + 3] = node.radius;
+      f32[fi + 4] = node.icon ?? 0;
     }
-    const byteLen = sorted.length * 16;
+    const byteLen = sorted.length * 20;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Uint8Array(this.nodeArrayBuf!, 0, byteLen),
+      gl.STATIC_DRAW,
+    );
     this.nodeGpuBytes = byteLen;
   }
 
-  private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
+  private setupEdgeGeometry(
+    gl: WebGL2RenderingContext,
+  ): WebGLVertexArrayObject {
     const vao = gl.createVertexArray();
     if (!vao) throw new Error("Failed to create edge VAO");
     gl.bindVertexArray(vao);
@@ -714,7 +793,9 @@ export class Renderer {
     count: number;
     groupSizes: number[];
   } {
-    const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const sorted = edges
+      .slice()
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureEdgeBuffer(sorted.length);
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
@@ -750,7 +831,11 @@ export class Renderer {
     }
     if (groupSize > 0) groupSizes.push(groupSize);
 
-    return { buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE), count, groupSizes };
+    return {
+      buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE),
+      count,
+      groupSizes,
+    };
   }
 
   private setEdgeObjects(edges: Edge[], animate: boolean): void {
@@ -782,7 +867,8 @@ export class Renderer {
   setEdges(buffer: ArrayBufferView, count: number): void;
   setEdges(edgesOrBuffer: Edge[] | ArrayBufferView, count?: number): void {
     if (Array.isArray(edgesOrBuffer)) {
-      const shouldAnimate = this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
+      const shouldAnimate =
+        this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
       this.setEdgeObjects(edgesOrBuffer, shouldAnimate);
       if (shouldAnimate) {
         this.startDataAnimation();
@@ -799,7 +885,11 @@ export class Renderer {
     this.edgeMap.clear();
     if (edgeCount > 0) {
       const gl = this.gl;
-      const src = new Uint8Array(buffer.buffer, buffer.byteOffset, edgeCount * EDGE_STRIDE);
+      const src = new Uint8Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        edgeCount * EDGE_STRIDE,
+      );
       const shuffled = shuffleEdgeBuffer(src, edgeCount);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
@@ -841,7 +931,9 @@ export class Renderer {
 
     // Re-pack edges if we have object edges (positions changed)
     if (this.edgeObjects.length > 0) {
-      const { buffer, count, groupSizes } = this.packEdgeBuffer(this.edgeObjects);
+      const { buffer, count, groupSizes } = this.packEdgeBuffer(
+        this.edgeObjects,
+      );
       this.edgeCount = count;
       if (count > 0) {
         const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
@@ -867,9 +959,13 @@ export class Renderer {
     this.dataAnimStart = performance.now();
 
     // Sort targets once at animation start (zIndex order doesn't change mid-animation)
-    const rawNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
-    this.sortedTargetNodes = rawNodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
+    const rawNodes =
+      this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    this.sortedTargetNodes = rawNodes
+      .slice()
+      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const rawEdges =
+      this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
     this.sortedTargetEdges =
       rawEdges.length > 0
         ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
@@ -891,12 +987,18 @@ export class Renderer {
         // Final state: upload actual target data (no interpolation artifacts)
         this.uploadNodeData(this.gl, this.nodes);
         if (this.edgeObjects.length > 0) {
-          const { buffer, count, groupSizes } = this.packEdgeBuffer(this.edgeObjects);
+          const { buffer, count, groupSizes } = this.packEdgeBuffer(
+            this.edgeObjects,
+          );
           this.edgeCount = count;
           if (count > 0) {
             const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-            this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
+            this.gl.bufferData(
+              this.gl.ARRAY_BUFFER,
+              shuffled,
+              this.gl.STATIC_DRAW,
+            );
             this.edgeGpuBytes = shuffled.byteLength;
           }
         }
@@ -923,8 +1025,8 @@ export class Renderer {
     for (let i = 0; i < target.length; i++) {
       const node = target[i];
       const old = this.oldNodeMap.get(node.id);
-      const fi = i * 4;
-      const bi = i * 16;
+      const fi = i * 5;
+      const bi = i * 20;
 
       if (old) {
         f32[fi] = lerp(old.x, node.x, t);
@@ -951,9 +1053,10 @@ export class Renderer {
         u8[bi + 11] = (opacity * 255 + 0.5) | 0;
         f32[fi + 3] = node.radius;
       }
+      f32[fi + 4] = node.icon ?? 0;
     }
 
-    const byteLen = target.length * 16;
+    const byteLen = target.length * 20;
     const view = new Uint8Array(this.nodeArrayBuf!, 0, byteLen);
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
@@ -971,7 +1074,8 @@ export class Renderer {
     const target = this.sortedTargetEdges;
 
     // Build interpolated node positions for resolving edge endpoints
-    const targetNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    const targetNodes =
+      this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
     const interpNodeMap = this.interpNodeMap;
     interpNodeMap.clear();
     const pool = this.interpNodePool;
@@ -1053,6 +1157,14 @@ export class Renderer {
 
   // --- Hit testing ---
 
+  private effectiveRadius(worldRadius: number): number {
+    const clientW = this.canvas.clientWidth || 1;
+    const worldPerCssPx = (this.halfW * 2) / clientW;
+    const minR = this.minScreenRadius * worldPerCssPx;
+    const maxR = this.maxScreenRadius * worldPerCssPx;
+    return Math.max(minR, Math.min(maxR, worldRadius));
+  }
+
   private hitTestNode(worldX: number, worldY: number): Node | null {
     let closest: Node | null = null;
     let closestDist = Infinity;
@@ -1062,7 +1174,8 @@ export class Renderer {
       const dx = worldX - node.x;
       const dy = worldY - node.y;
       const distSq = dx * dx + dy * dy;
-      const rSq = node.radius * node.radius;
+      const r = this.effectiveRadius(node.radius);
+      const rSq = r * r;
       if (distSq < rSq && distSq < closestDist) {
         closestDist = distSq;
         closest = node;
@@ -1104,10 +1217,20 @@ export class Renderer {
       const maxX = Math.max(src.x, tgt.x, ctrlX) + edgeTol;
       const minY = Math.min(src.y, tgt.y, ctrlY) - edgeTol;
       const maxY = Math.max(src.y, tgt.y, ctrlY) + edgeTol;
-      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue;
+      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY)
+        continue;
 
       // Analytical closest-point distance to center line
-      const dSq = distSqToBezier(worldX, worldY, src.x, src.y, ctrlX, ctrlY, tgt.x, tgt.y);
+      const dSq = distSqToBezier(
+        worldX,
+        worldY,
+        src.x,
+        src.y,
+        ctrlX,
+        ctrlY,
+        tgt.x,
+        tgt.y,
+      );
       if (dSq < edgeTol * edgeTol && dSq < closestDistSq) {
         closestDistSq = dSq;
         closest = edge;
@@ -1249,18 +1372,37 @@ export class Renderer {
 
     const node = this.hitTestNode(worldX, worldY);
     if (node && this.onNodeClick) {
-      this.onNodeClick({ type: "click", nodeId: node.id, node, worldX, worldY, originalEvent: e });
+      this.onNodeClick({
+        type: "click",
+        nodeId: node.id,
+        node,
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
       return;
     }
 
     const edge = this.hitTestEdge(worldX, worldY);
     if (edge && this.onEdgeClick) {
-      this.onEdgeClick({ type: "click", edgeId: edge.id, edge, worldX, worldY, originalEvent: e });
+      this.onEdgeClick({
+        type: "click",
+        edgeId: edge.id,
+        edge,
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
       return;
     }
 
     if (this.onBackgroundClick) {
-      this.onBackgroundClick({ type: "click", worldX, worldY, originalEvent: e });
+      this.onBackgroundClick({
+        type: "click",
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
     }
   }
 
@@ -1296,7 +1438,12 @@ export class Renderer {
     }
 
     if (this.onBackgroundDblClick) {
-      this.onBackgroundDblClick({ type: "dblclick", worldX, worldY, originalEvent: e });
+      this.onBackgroundDblClick({
+        type: "dblclick",
+        worldX,
+        worldY,
+        originalEvent: e,
+      });
     }
   }
 
@@ -1418,7 +1565,10 @@ export class Renderer {
     return this.cachedRect;
   }
 
-  private screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
+  private screenToWorld(
+    screenX: number,
+    screenY: number,
+  ): { x: number; y: number } {
     const rect = this.getRect();
     const nx = (screenX - rect.left) / rect.width;
     const ny = (screenY - rect.top) / rect.height;
@@ -1519,7 +1669,10 @@ export class Renderer {
     const displayWidth = Math.round(this.canvas.clientWidth * dpr);
     const displayHeight = Math.round(this.canvas.clientHeight * dpr);
 
-    if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
+    if (
+      this.canvas.width !== displayWidth ||
+      this.canvas.height !== displayHeight
+    ) {
       const newAspect = displayWidth / displayHeight;
       this.halfW = this.halfH * newAspect;
       this.canvas.width = displayWidth;
@@ -1538,6 +1691,35 @@ export class Renderer {
     this.vpMaxY = this.centerY + this.halfH;
   }
 
+  /** Upload an icon atlas texture. columns/rows describe the grid layout. */
+  setIconAtlas(source: TexImageSource, columns: number, rows: number): void {
+    const gl = this.gl;
+    if (!this.iconAtlasTexture) {
+      this.iconAtlasTexture = gl.createTexture();
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.iconAtlasColumns = columns;
+    this.iconAtlasRows = rows;
+
+    gl.useProgram(this.program);
+    gl.uniform1i(this.iconAtlasLocation!, 0);
+    gl.uniform1f(this.iconAtlasColsLocation!, columns);
+    gl.uniform1f(this.iconAtlasRowsLocation!, rows);
+    this.requestRender();
+  }
+
+  /** Build atlas from SVG strings and upload as icon texture. */
+  async setIcons(svgStrings: string[], cellSize?: number): Promise<void> {
+    const { canvas, columns, rows } = await buildIconAtlas(svgStrings, cellSize);
+    this.setIconAtlas(canvas, columns, rows);
+  }
+
   render(): void {
     const gl = this.gl;
 
@@ -1550,6 +1732,12 @@ export class Renderer {
     const projScaleY = this.projScaleY;
     const projOffsetX = this.projOffsetX;
     const projOffsetY = this.projOffsetY;
+
+    // Convert CSS pixel radius limits to world-space
+    const clientW = this.canvas.clientWidth || 1;
+    const worldPerCssPx = (this.halfW * 2) / clientW;
+    const minR = this.minScreenRadius * worldPerCssPx;
+    const maxR = this.maxScreenRadius * worldPerCssPx;
 
     // Draw edges behind nodes.
     // Cap instance count to limit fragment overdraw on high-DPI displays.
@@ -1587,8 +1775,20 @@ export class Renderer {
         this.sentEdgeVpMaxX = vpMaxX;
         this.sentEdgeVpMaxY = vpMaxY;
       }
+      if (minR !== this.sentEdgeMinRadius || maxR !== this.sentEdgeMaxRadius) {
+        gl.uniform1f(this.edgeMinRadiusLocation, minR);
+        gl.uniform1f(this.edgeMaxRadiusLocation, maxR);
+        this.sentEdgeMinRadius = minR;
+        this.sentEdgeMaxRadius = maxR;
+      }
       gl.bindVertexArray(this.edgeVao);
-      gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
+      gl.drawElementsInstanced(
+        gl.TRIANGLES,
+        51,
+        gl.UNSIGNED_BYTE,
+        0,
+        drawEdges,
+      );
     }
 
     // Draw nodes on top of edges
@@ -1606,6 +1806,18 @@ export class Renderer {
       this.sentNodeOffsetX = projOffsetX;
       this.sentNodeOffsetY = projOffsetY;
     }
+    if (minR !== this.sentMinRadius || maxR !== this.sentMaxRadius) {
+      gl.uniform1f(this.nodeMinRadiusLocation, minR);
+      gl.uniform1f(this.nodeMaxRadiusLocation, maxR);
+      this.sentMinRadius = minR;
+      this.sentMaxRadius = maxR;
+    }
+    // Bind icon atlas texture and set LOD threshold
+    if (this.iconAtlasTexture) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
+    }
+    gl.uniform1f(this.iconLodRadiusLocation!, this.iconLodRadius * worldPerCssPx);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
   }
@@ -1616,6 +1828,10 @@ export class Renderer {
     if (this.dataAnimId !== null) {
       cancelAnimationFrame(this.dataAnimId);
       this.dataAnimId = null;
+    }
+    if (this.iconAtlasTexture) {
+      this.gl.deleteTexture(this.iconAtlasTexture);
+      this.iconAtlasTexture = null;
     }
     this.resizeObserver.disconnect();
   }
