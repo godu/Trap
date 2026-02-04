@@ -1,6 +1,11 @@
 import { Renderer } from "../src/index";
 import type { Node, Edge } from "../src/index";
-import smallResources from "./small.minimal-resources.json";
+import smallResourcesUrl from "./small.minimal-resources.json?url";
+import smallEdgesUrl from "./small.minimal-edges.json?url";
+import mediumResourcesUrl from "./medium.minimal-resources.json?url";
+import mediumEdgesUrl from "./medium.minimal-edges.json?url";
+import largeResourcesUrl from "./large.minimal-resources.json?url";
+import largeEdgesUrl from "./large.minimal-edges.json?url";
 import { ICON_SVGS, TYPE_ICON_INDEX } from "./icons/index";
 import {
   TYPE_COLORS,
@@ -88,8 +93,13 @@ function buildAdjacency(edges: Edge[]): {
   return { adjacency, edgesByNode };
 }
 
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  return res.json();
+}
+
 // Current state
-let currentNodes: Node[] = toNodes(smallResources as Resource[]);
+let currentNodes: Node[] = [];
 let currentEdges: Edge[] = [];
 let adjacency: Adjacency = new Map();
 let edgesByNode: EdgesByNode = new Map();
@@ -159,7 +169,7 @@ function showEvent(type: string, target: string, id?: string) {
 
 const renderer = new Renderer({
   canvas,
-  nodes: currentNodes,
+  nodes: [],
   animationDuration: 300,
   onNodeClick: (e) => {
     showEvent(e.type, "node", e.nodeId);
@@ -185,37 +195,65 @@ const renderer = new Renderer({
 renderer.setIcons(ICON_SVGS);
 renderer.render();
 
-// Load edges for initial small dataset
+const cache = new Map<string, Promise<[Resource[], EdgeData[]]>>();
+
 const loaders: Record<string, () => Promise<[Resource[], EdgeData[]]>> = {
   small: () =>
     Promise.all([
-      Promise.resolve(smallResources as Resource[]),
-      import("./small.minimal-edges.json").then((m) => m.default as EdgeData[]),
+      fetchJson<Resource[]>(smallResourcesUrl),
+      fetchJson<EdgeData[]>(smallEdgesUrl),
     ]),
   medium: () =>
     Promise.all([
-      import("./medium.minimal-resources.json").then(
-        (m) => m.default as Resource[],
-      ),
-      import("./medium.minimal-edges.json").then(
-        (m) => m.default as EdgeData[],
-      ),
+      fetchJson<Resource[]>(mediumResourcesUrl),
+      fetchJson<EdgeData[]>(mediumEdgesUrl),
     ]),
   large: () =>
     Promise.all([
-      import("./large.minimal-resources.json").then(
-        (m) => m.default as Resource[],
-      ),
-      import("./large.minimal-edges.json").then((m) => m.default as EdgeData[]),
+      fetchJson<Resource[]>(largeResourcesUrl),
+      fetchJson<EdgeData[]>(largeEdgesUrl),
     ]),
 };
 
-loaders.small().then(([resources, edgeData]) => {
-  const nodes = toNodes(resources);
-  const edges = toEdges(edgeData, resources);
-  updateState(nodes, edges);
-  renderer.setEdges(edges);
-});
+function loadRaw(name: string): Promise<[Resource[], EdgeData[]]> {
+  let p = cache.get(name);
+  if (!p) {
+    p = loaders[name]();
+    cache.set(name, p);
+  }
+  return p;
+}
+
+let loading = false;
+
+function setButtonsDisabled(disabled: boolean) {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(
+    "#dataset-toggle button, #fit-btn",
+  )) {
+    btn.disabled = disabled;
+  }
+}
+
+async function loadDataset(name: string) {
+  if (loading) return;
+  loading = true;
+  setButtonsDisabled(true);
+  try {
+    const [resources, edgeData] = await loadRaw(name);
+    const nodes = toNodes(resources);
+    const edges = toEdges(edgeData, resources);
+    const firstLoad = currentNodes.length === 0;
+    updateState(nodes, edges);
+    renderer.setNodes(nodes);
+    renderer.setEdges(edges);
+    renderer.fitToNodes(firstLoad ? 0 : undefined);
+  } finally {
+    loading = false;
+    setButtonsDisabled(false);
+  }
+}
+
+loadDataset("small");
 
 document.getElementById("fit-btn")?.addEventListener("click", () => {
   renderer.fitToNodes();
@@ -225,19 +263,12 @@ document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
     "button[data-dataset]",
   );
-  if (!btn) return;
+  if (!btn || btn.disabled) return;
 
   const dataset = btn.dataset.dataset!;
   for (const b of btn.parentElement!.querySelectorAll("button")) {
     b.setAttribute("aria-pressed", String(b === btn));
   }
 
-  loaders[dataset]().then(([resources, edgeData]) => {
-    const nodes = toNodes(resources);
-    const edges = toEdges(edgeData, resources);
-    updateState(nodes, edges);
-    renderer.setNodes(nodes);
-    renderer.setEdges(edges);
-    renderer.fitToNodes();
-  });
+  loadDataset(dataset);
 });
