@@ -91,8 +91,11 @@ uniform float u_curvature;
 uniform vec4 u_viewport;
 uniform float u_minRadius;
 uniform float u_maxRadius;
+uniform float u_pxPerWorld;
 
 flat out vec4 v_color;
+out float v_edgeDist;
+flat out float v_halfWidthPx;
 
 void main() {
   float srcRadius = clamp(a_radii.x, u_minRadius, u_maxRadius);
@@ -150,12 +153,24 @@ void main() {
   float headT = headLen / speed0;
 
   float tParam = a_template.x;
-  float perpOffset = a_template.y * a_width;
   float flag = a_template.z;
 
   // Compute Bezier parameter
   float s0 = step(0.5, flag);  // 1 for head base/tip
   float s1 = step(1.5, flag);  // 1 for head tip only
+
+  // Minimum shaft width: ensure at least 1px (0.5px half-width)
+  float shaftHwPx = 0.2 * a_width * u_pxPerWorld;
+  float minScale = max(1.0, 0.5 / max(shaftHwPx, 0.001));
+  float effectiveWidth = a_width * minScale;
+  float perpOffset = a_template.y * effectiveWidth;
+
+  // 1px AA expansion outward (shaft only)
+  perpOffset += (1.0 - s0) * sign(a_template.y) / max(u_pxPerWorld, 0.001);
+
+  float effectiveHwPx = max(shaftHwPx, 0.5);
+  v_edgeDist = mix(perpOffset * u_pxPerWorld, 0.0, s0);
+  v_halfWidthPx = mix(effectiveHwPx, 1000.0, s0);
   // shaft: tStart + tParam * (tRange - headT)
   // head base: tEnd - headT
   // head tip: tEnd
@@ -182,11 +197,15 @@ export const edgeFragmentSource = `#version 300 es
 precision mediump float;
 
 flat in vec4 v_color;
+in float v_edgeDist;
+flat in float v_halfWidthPx;
 
 out vec4 outColor;
 
 void main() {
-  outColor = v_color;
+  float d = abs(v_edgeDist);
+  float aa = clamp(v_halfWidthPx + 0.5 - d, 0.0, 1.0);
+  outColor = v_color * aa;
 }
 `;
 
