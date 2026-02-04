@@ -210,67 +210,6 @@ export function sampleBezier(
   return bezierResult;
 }
 
-// Pre-allocated shuffle buffers (grow-on-demand, reused across calls)
-let shuffleIndices = new Uint32Array(64);
-let shuffleOutput = new Uint8Array(64 * EDGE_STRIDE);
-
-function ensureShuffleBuffers(count: number): void {
-  if (shuffleIndices.length < count) {
-    let cap = shuffleIndices.length;
-    while (cap < count) cap *= 2;
-    shuffleIndices = new Uint32Array(cap);
-    shuffleOutput = new Uint8Array(cap * EDGE_STRIDE);
-  }
-}
-
-/** Fisher-Yates shuffle of edge buffer within zIndex groups (EDGE_STRIDE bytes per record). */
-function shuffleEdgeBuffer(
-  buf: Uint8Array,
-  count: number,
-  groupSizes?: number[],
-): Uint8Array {
-  ensureShuffleBuffers(count);
-
-  if (!groupSizes || groupSizes.length <= 1) {
-    for (let i = 0; i < count; i++) shuffleIndices[i] = i;
-    for (let i = count - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const tmp = shuffleIndices[i];
-      shuffleIndices[i] = shuffleIndices[j];
-      shuffleIndices[j] = tmp;
-    }
-    for (let i = 0; i < count; i++) {
-      const srcOff = shuffleIndices[i] * EDGE_STRIDE;
-      shuffleOutput.set(
-        buf.subarray(srcOff, srcOff + EDGE_STRIDE),
-        i * EDGE_STRIDE,
-      );
-    }
-    return shuffleOutput.subarray(0, count * EDGE_STRIDE);
-  }
-
-  // Shuffle within each zIndex group independently
-  let offset = 0;
-  for (const size of groupSizes) {
-    for (let i = 0; i < size; i++) shuffleIndices[i] = offset + i;
-    for (let i = size - 1; i > 0; i--) {
-      const j = (Math.random() * (i + 1)) | 0;
-      const tmp = shuffleIndices[i];
-      shuffleIndices[i] = shuffleIndices[j];
-      shuffleIndices[j] = tmp;
-    }
-    for (let i = 0; i < size; i++) {
-      const srcOff = shuffleIndices[i] * EDGE_STRIDE;
-      shuffleOutput.set(
-        buf.subarray(srcOff, srcOff + EDGE_STRIDE),
-        (offset + i) * EDGE_STRIDE,
-      );
-    }
-    offset += size;
-  }
-  return shuffleOutput.subarray(0, count * EDGE_STRIDE);
-}
-
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private canvas: HTMLCanvasElement;
@@ -794,7 +733,6 @@ export class Renderer {
   private packEdgeBuffer(edges: Edge[]): {
     buffer: Uint8Array;
     count: number;
-    groupSizes: number[];
   } {
     const sorted = edges
       .slice()
@@ -803,22 +741,12 @@ export class Renderer {
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
     let count = 0;
-    const groupSizes: number[] = [];
-    let currentZ = -Infinity;
-    let groupSize = 0;
 
     for (let i = 0; i < sorted.length; i++) {
       const edge = sorted[i];
       const src = this.nodeMap.get(edge.source);
       const tgt = this.nodeMap.get(edge.target);
       if (!src || !tgt) continue;
-
-      const z = edge.zIndex ?? 0;
-      if (z !== currentZ) {
-        if (groupSize > 0) groupSizes.push(groupSize);
-        currentZ = z;
-        groupSize = 0;
-      }
 
       const slot = count * 8; // 32 bytes / 4 = 8 uint32-slots per edge
       f32[slot] = src.x;
@@ -829,15 +757,12 @@ export class Renderer {
       f32[slot + 5] = tgt.radius;
       u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a);
       f32[slot + 7] = edge.width ?? 1.0;
-      groupSize++;
       count++;
     }
-    if (groupSize > 0) groupSizes.push(groupSize);
 
     return {
       buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE),
       count,
-      groupSizes,
     };
   }
 
@@ -853,14 +778,13 @@ export class Renderer {
     this.edgeMap.clear();
     for (const e of edges) this.edgeMap.set(e.id, e);
 
-    const { buffer, count, groupSizes } = this.packEdgeBuffer(edges);
+    const { buffer, count } = this.packEdgeBuffer(edges);
     this.edgeCount = count;
     if (count > 0) {
-      const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
       const gl = this.gl;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
-      this.edgeGpuBytes = shuffled.byteLength;
+      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
+      this.edgeGpuBytes = buffer.byteLength;
     }
   }
 
@@ -893,10 +817,9 @@ export class Renderer {
         buffer.byteOffset,
         edgeCount * EDGE_STRIDE,
       );
-      const shuffled = shuffleEdgeBuffer(src, edgeCount);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, shuffled, gl.STATIC_DRAW);
-      this.edgeGpuBytes = shuffled.byteLength;
+      gl.bufferData(gl.ARRAY_BUFFER, src, gl.STATIC_DRAW);
+      this.edgeGpuBytes = src.byteLength;
     }
     this.requestRender();
   }
@@ -934,15 +857,12 @@ export class Renderer {
 
     // Re-pack edges if we have object edges (positions changed)
     if (this.edgeObjects.length > 0) {
-      const { buffer, count, groupSizes } = this.packEdgeBuffer(
-        this.edgeObjects,
-      );
+      const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
       this.edgeCount = count;
       if (count > 0) {
-        const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, shuffled, this.gl.STATIC_DRAW);
-        this.edgeGpuBytes = shuffled.byteLength;
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
+        this.edgeGpuBytes = buffer.byteLength;
       }
     }
 
@@ -990,19 +910,16 @@ export class Renderer {
         // Final state: upload actual target data (no interpolation artifacts)
         this.uploadNodeData(this.gl, this.nodes);
         if (this.edgeObjects.length > 0) {
-          const { buffer, count, groupSizes } = this.packEdgeBuffer(
-            this.edgeObjects,
-          );
+          const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
           this.edgeCount = count;
           if (count > 0) {
-            const shuffled = shuffleEdgeBuffer(buffer, count, groupSizes);
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
             this.gl.bufferData(
               this.gl.ARRAY_BUFFER,
-              shuffled,
+              buffer,
               this.gl.STATIC_DRAW,
             );
-            this.edgeGpuBytes = shuffled.byteLength;
+            this.edgeGpuBytes = buffer.byteLength;
           }
         }
         this.oldNodes = [];
@@ -1144,7 +1061,6 @@ export class Renderer {
 
     this.edgeCount = count;
     if (count > 0) {
-      // Skip shuffle during animation frames for performance
       const byteLen = count * EDGE_STRIDE;
       const view = this.edgeBufU8!.subarray(0, byteLen);
       const gl = this.gl;
@@ -1743,10 +1659,7 @@ export class Renderer {
     const maxR = this.maxScreenRadius * worldPerCssPx;
 
     // Draw edges behind nodes.
-    // Cap instance count to limit fragment overdraw on high-DPI displays.
-    // The edge buffer is shuffled at upload time so any prefix has uniform spatial coverage.
-    const MAX_DRAW_EDGES = 65536;
-    const drawEdges = Math.min(this.edgeCount, MAX_DRAW_EDGES);
+    const drawEdges = this.edgeCount;
     if (drawEdges > 0) {
       const vpMinX = this.vpMinX;
       const vpMinY = this.vpMinY;
