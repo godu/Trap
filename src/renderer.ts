@@ -1,25 +1,9 @@
-import type {
-  Node,
-  Edge,
-  RendererOptions,
-  NodeEvent,
-  EdgeEvent,
-  BackgroundEvent,
-} from "./types";
-import {
-  vertexSource,
-  fragmentSource,
-  edgeVertexSource,
-  edgeFragmentSource,
-} from "./shaders";
+import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent } from "./types";
+import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
 import { buildIconAtlas } from "./atlas";
 
-function compileShader(
-  gl: WebGL2RenderingContext,
-  type: number,
-  source: string,
-): WebGLShader {
+function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error("Failed to create shader");
   gl.shaderSource(shader, source);
@@ -370,10 +354,7 @@ export class Renderer {
   private edgeGpuBytes = 0;
 
   // Reusable Map + object pool for interpolateEdges
-  private interpNodeMap = new Map<
-    string,
-    { x: number; y: number; radius: number }
-  >();
+  private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
   private interpNodePool: { x: number; y: number; radius: number }[] = [];
 
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
@@ -446,8 +427,7 @@ export class Renderer {
 
     const esLoc = gl.getUniformLocation(this.edgeProgram, "u_scale");
     const eoLoc = gl.getUniformLocation(this.edgeProgram, "u_offset");
-    if (!esLoc || !eoLoc)
-      throw new Error("u_scale/u_offset not found in edge program");
+    if (!esLoc || !eoLoc) throw new Error("u_scale/u_offset not found in edge program");
     this.edgeScaleLocation = esLoc;
     this.edgeOffsetLocation = eoLoc;
 
@@ -519,10 +499,7 @@ export class Renderer {
     this.halfH = view.halfH;
   }
 
-  private setupGeometry(
-    gl: WebGL2RenderingContext,
-    nodes: Node[],
-  ): WebGLVertexArrayObject {
+  private setupGeometry(gl: WebGL2RenderingContext, nodes: Node[]): WebGLVertexArrayObject {
     const vao = gl.createVertexArray();
     if (!vao) throw new Error("Failed to create VAO");
     gl.bindVertexArray(vao);
@@ -601,9 +578,7 @@ export class Renderer {
 
   private uploadNodeData(gl: WebGL2RenderingContext, nodes: Node[]): void {
     // Sort by zIndex for draw ordering (lower zIndex draws first = behind)
-    const sorted = nodes
-      .slice()
-      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const sorted = nodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureNodeBuffer(sorted.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
@@ -623,17 +598,11 @@ export class Renderer {
     }
     const byteLen = sorted.length * 20;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(
-      gl.ARRAY_BUFFER,
-      new Uint8Array(this.nodeArrayBuf!, 0, byteLen),
-      gl.STATIC_DRAW,
-    );
+    gl.bufferData(gl.ARRAY_BUFFER, new Uint8Array(this.nodeArrayBuf!, 0, byteLen), gl.STATIC_DRAW);
     this.nodeGpuBytes = byteLen;
   }
 
-  private setupEdgeGeometry(
-    gl: WebGL2RenderingContext,
-  ): WebGLVertexArrayObject {
+  private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
     const vao = gl.createVertexArray();
     if (!vao) throw new Error("Failed to create edge VAO");
     gl.bindVertexArray(vao);
@@ -734,9 +703,7 @@ export class Renderer {
     buffer: Uint8Array;
     count: number;
   } {
-    const sorted = edges
-      .slice()
-      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const sorted = edges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureEdgeBuffer(sorted.length);
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
@@ -794,8 +761,7 @@ export class Renderer {
   setEdges(buffer: ArrayBufferView, count: number): void;
   setEdges(edgesOrBuffer: Edge[] | ArrayBufferView, count?: number): void {
     if (Array.isArray(edgesOrBuffer)) {
-      const shouldAnimate =
-        this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
+      const shouldAnimate = this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
       this.setEdgeObjects(edgesOrBuffer, shouldAnimate);
       if (shouldAnimate) {
         this.startDataAnimation();
@@ -812,11 +778,7 @@ export class Renderer {
     this.edgeMap.clear();
     if (edgeCount > 0) {
       const gl = this.gl;
-      const src = new Uint8Array(
-        buffer.buffer,
-        buffer.byteOffset,
-        edgeCount * EDGE_STRIDE,
-      );
+      const src = new Uint8Array(buffer.buffer, buffer.byteOffset, edgeCount * EDGE_STRIDE);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, src, gl.STATIC_DRAW);
       this.edgeGpuBytes = src.byteLength;
@@ -882,13 +844,9 @@ export class Renderer {
     this.dataAnimStart = performance.now();
 
     // Sort targets once at animation start (zIndex order doesn't change mid-animation)
-    const rawNodes =
-      this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
-    this.sortedTargetNodes = rawNodes
-      .slice()
-      .sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const rawEdges =
-      this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
+    const rawNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    this.sortedTargetNodes = rawNodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
     this.sortedTargetEdges =
       rawEdges.length > 0
         ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
@@ -914,11 +872,7 @@ export class Renderer {
           this.edgeCount = count;
           if (count > 0) {
             this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-            this.gl.bufferData(
-              this.gl.ARRAY_BUFFER,
-              buffer,
-              this.gl.STATIC_DRAW,
-            );
+            this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
             this.edgeGpuBytes = buffer.byteLength;
           }
         }
@@ -994,8 +948,7 @@ export class Renderer {
     const target = this.sortedTargetEdges;
 
     // Build interpolated node positions for resolving edge endpoints
-    const targetNodes =
-      this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
+    const targetNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
     const interpNodeMap = this.interpNodeMap;
     interpNodeMap.clear();
     const pool = this.interpNodePool;
@@ -1136,20 +1089,10 @@ export class Renderer {
       const maxX = Math.max(src.x, tgt.x, ctrlX) + edgeTol;
       const minY = Math.min(src.y, tgt.y, ctrlY) - edgeTol;
       const maxY = Math.max(src.y, tgt.y, ctrlY) + edgeTol;
-      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY)
-        continue;
+      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue;
 
       // Analytical closest-point distance to center line
-      const dSq = distSqToBezier(
-        worldX,
-        worldY,
-        src.x,
-        src.y,
-        ctrlX,
-        ctrlY,
-        tgt.x,
-        tgt.y,
-      );
+      const dSq = distSqToBezier(worldX, worldY, src.x, src.y, ctrlX, ctrlY, tgt.x, tgt.y);
       if (dSq < edgeTol * edgeTol && dSq < closestDistSq) {
         closestDistSq = dSq;
         closest = edge;
@@ -1484,10 +1427,7 @@ export class Renderer {
     return this.cachedRect;
   }
 
-  private screenToWorld(
-    screenX: number,
-    screenY: number,
-  ): { x: number; y: number } {
+  private screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
     const rect = this.getRect();
     const nx = (screenX - rect.left) / rect.width;
     const ny = (screenY - rect.top) / rect.height;
@@ -1588,10 +1528,7 @@ export class Renderer {
     const displayWidth = Math.round(this.canvas.clientWidth * dpr);
     const displayHeight = Math.round(this.canvas.clientHeight * dpr);
 
-    if (
-      this.canvas.width !== displayWidth ||
-      this.canvas.height !== displayHeight
-    ) {
+    if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
       const newAspect = displayWidth / displayHeight;
       this.halfW = this.halfH * newAspect;
       this.canvas.width = displayWidth;
@@ -1703,13 +1640,7 @@ export class Renderer {
         this.sentEdgePxPerWorld = pxPerWorld;
       }
       gl.bindVertexArray(this.edgeVao);
-      gl.drawElementsInstanced(
-        gl.TRIANGLES,
-        51,
-        gl.UNSIGNED_BYTE,
-        0,
-        drawEdges,
-      );
+      gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
     }
 
     // Draw nodes on top of edges
