@@ -19,10 +19,29 @@ const steps: GraphStep[] = [
 
 // Initialize renderer with Step 1
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const eventInfo = document.getElementById("event-info")!;
 const initialNodes = toRenderNodes(steps[0]);
 const initialEdges = toEdges(steps[0]);
 
-const renderer = new Renderer({ canvas, nodes: initialNodes, edges: initialEdges });
+function showEvent(type: string, target: string, id?: string) {
+  eventInfo.textContent = id ? `${type} ${target} ${id}` : `${type} ${target}`;
+}
+
+const renderer = new Renderer({
+  canvas,
+  nodes: initialNodes,
+  edges: initialEdges,
+  onNodeClick: (e) => showEvent(e.type, "node", e.nodeId),
+  onNodeDblClick: (e) => showEvent(e.type, "node", e.nodeId),
+  onNodeHoverEnter: (e) => showEvent(e.type, "node", e.nodeId),
+  onNodeHoverLeave: (e) => showEvent(e.type, "node", e.nodeId),
+  onEdgeClick: (e) => showEvent(e.type, "edge", e.edgeId),
+  onEdgeDblClick: (e) => showEvent(e.type, "edge", e.edgeId),
+  onEdgeHoverEnter: (e) => showEvent(e.type, "edge", e.edgeId),
+  onEdgeHoverLeave: (e) => showEvent(e.type, "edge", e.edgeId),
+  onBackgroundClick: (e) => showEvent(e.type, "background"),
+  onBackgroundDblClick: (e) => showEvent(e.type, "background"),
+});
 renderer.setIcons(ICON_SVGS);
 renderer.render();
 renderer.fitToNodes(0);
