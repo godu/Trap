@@ -67,10 +67,10 @@ export interface RendererOptions {
   onEdgeHoverLeave?: (event: EdgeEvent) => void;
   onBackgroundClick?: (event: BackgroundEvent) => void;
   onBackgroundDblClick?: (event: BackgroundEvent) => void;
+  /** Called after each render. */
+  onRender?: () => void;
   /** Minimum node screen radius in CSS pixels (default: 2). */
   minScreenRadius?: number;
   /** Maximum node screen radius in CSS pixels (default: 40). */
   maxScreenRadius?: number;
-  /** Minimum node screen radius in CSS pixels at which icons become visible (default: 8). */
-  iconLodRadius?: number;
 }

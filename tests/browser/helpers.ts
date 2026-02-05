@@ -225,12 +225,14 @@ export function simulateWheel(
   cssX: number,
   cssY: number,
   deltaY: number,
+  ctrlKey = false,
 ): void {
   canvas.dispatchEvent(
     new WheelEvent("wheel", {
       clientX: cssX,
       clientY: cssY,
       deltaY,
+      ctrlKey,
       bubbles: true,
       cancelable: true,
     }),

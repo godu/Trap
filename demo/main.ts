@@ -1,5 +1,6 @@
 import { Renderer } from "../src/index";
 import type { Node, Edge } from "../src/index";
+import { initFpsCounter, countRenderFrame } from "./fps";
 import smallResourcesUrl from "./small.minimal-resources.json?url";
 import smallEdgesUrl from "./small.minimal-edges.json?url";
 import mediumResourcesUrl from "./medium.minimal-resources.json?url";
@@ -190,6 +191,7 @@ const renderer = new Renderer({
     clearHighlight();
   },
   onBackgroundDblClick: (e) => showEvent(e.type, "background"),
+  onRender: countRenderFrame,
 });
 
 renderer.setIcons(ICON_SVGS);
@@ -254,6 +256,9 @@ async function loadDataset(name: string) {
 }
 
 loadDataset("small");
+
+// Initialize FPS counter
+initFpsCounter();
 
 document.getElementById("fit-btn")?.addEventListener("click", () => {
   renderer.fitToNodes();

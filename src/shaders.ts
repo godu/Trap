@@ -46,18 +46,17 @@ flat in float v_worldRadius;
 uniform sampler2D u_iconAtlas;
 uniform float u_atlasColumns;
 uniform float u_atlasRows;
-uniform float u_iconLodRadius;
 
 out vec4 outColor;
 
 void main() {
   float dist = dot(v_uv, v_uv);
   if (dist > 1.0) discard;
-  float alpha = 1.0 - smoothstep(0.81, 1.0, dist);
+  float alpha = 1.0 - smoothstep(0.9, 1.0, dist);
   float a = alpha * v_color.a;
   vec4 base = vec4(v_color.rgb * a, a);
 
-  if (v_iconIndex > 0.5 && v_worldRadius > u_iconLodRadius && u_atlasColumns > 0.0) {
+  if (v_iconIndex > 0.5 && u_atlasColumns > 0.0) {
     vec2 iconUV = v_uv * 0.5 + 0.5;
     float idx = v_iconIndex - 1.0;
     float col = mod(idx, u_atlasColumns);
@@ -67,9 +66,7 @@ void main() {
       (row + 1.0 - iconUV.y) / u_atlasRows
     );
     float iconAlpha = texture(u_iconAtlas, atlasUV).a;
-    float lodFade = smoothstep(u_iconLodRadius, u_iconLodRadius * 1.5, v_worldRadius);
-    float ia = iconAlpha * a * lodFade;
-    base = vec4(base.rgb + ia, base.a);
+    base = vec4(base.rgb + iconAlpha * a, base.a);
   }
 
   outColor = base;
