@@ -693,7 +693,7 @@ export class Renderer {
     }
     const byteLen = sorted.length * 20;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.nodeU8!.subarray(0, byteLen), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, this.nodeU8!.subarray(0, byteLen), gl.DYNAMIC_DRAW);
     this.nodeGpuBytes = byteLen;
   }
 
