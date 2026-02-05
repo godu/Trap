@@ -62,6 +62,8 @@ const EDGE_STRIDE = 32; // bytes per edge instance
 const CURVATURE = 0.4;
 const CLICK_THRESHOLD = 5; // px
 const DOUBLE_TAP_TIMEOUT = 300; // ms
+const ZOOM_IN_FACTOR = 1.1;
+const ZOOM_OUT_FACTOR = 1 / 1.1; // pre-computed to avoid division at runtime
 
 /**
  * Minimum squared distance from point (px,py) to quadratic Bezier P0→P1→P2.
@@ -315,6 +317,7 @@ export class Renderer {
 
   // Cached layout values
   private cachedRect: DOMRect | null = null;
+  private cachedDpr = 1;
 
   // Reusable world-coordinate result (avoids allocation per event)
   private worldResult = { x: 0, y: 0 };
@@ -1098,17 +1101,23 @@ export class Renderer {
     let closest: Node | null = null;
     let closestDist = Infinity;
 
-    const clientW = this.canvas.clientWidth || 1;
+    // Use canvas.width/dpr to avoid clientWidth layout query
+    const clientW = this.canvas.width / this.cachedDpr || 1;
     const worldPerCssPx = (this.halfW * 2) / clientW;
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
 
-    for (let i = 0; i < this.nodes.length; i++) {
-      const node = this.nodes[i];
+    const nodes = this.nodes;
+    const len = nodes.length;
+    for (let i = 0; i < len; i++) {
+      const node = nodes[i];
       const dx = worldX - node.x;
       const dy = worldY - node.y;
       const distSq = dx * dx + dy * dy;
-      const r = Math.max(minR, Math.min(maxR, node.radius));
+      // Clamp radius inline (avoid function call)
+      let r = node.radius;
+      if (r < minR) r = minR;
+      else if (r > maxR) r = maxR;
       const rSq = r * r;
       if (distSq < rSq && distSq < closestDist) {
         closestDist = distSq;
@@ -1120,8 +1129,9 @@ export class Renderer {
   }
 
   private hitTestEdge(worldX: number, worldY: number): Edge | null {
-    const rect = this.getRect();
-    const worldPerPx = (this.halfW * 2) / rect.width;
+    // Use canvas.width/dpr to avoid clientWidth layout query
+    const clientW = this.canvas.width / this.cachedDpr || 1;
+    const worldPerPx = (this.halfW * 2) / clientW;
     const baseTol = worldPerPx * 5;
 
     let closest: Edge | null = null;
@@ -1178,8 +1188,7 @@ export class Renderer {
         e.preventDefault();
         if (e.ctrlKey) {
           // Pinch gesture on trackpad
-          const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-          this.zoomAt(e.clientX, e.clientY, factor);
+          this.zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR);
         } else {
           // Two-finger scroll → pan
           this.pan(-e.deltaX, -e.deltaY);
@@ -1283,11 +1292,27 @@ export class Renderer {
           const dy = touches[0].clientY - this.touch0Y;
           this.pan(dx, dy);
         } else if (touches.length >= 2 && prevCount >= 2) {
-          // Two-finger pan
-          const oldMidX = (this.touch0X + this.touch1X) / 2;
-          const oldMidY = (this.touch0Y + this.touch1Y) / 2;
-          const newMidX = (touches[0].clientX + touches[1].clientX) / 2;
-          const newMidY = (touches[0].clientY + touches[1].clientY) / 2;
+          // Pinch zoom: compare finger distances
+          const oldDx = this.touch0X - this.touch1X;
+          const oldDy = this.touch0Y - this.touch1Y;
+          const oldDist = Math.sqrt(oldDx * oldDx + oldDy * oldDy);
+
+          const newDx = touches[0].clientX - touches[1].clientX;
+          const newDy = touches[0].clientY - touches[1].clientY;
+          const newDist = Math.sqrt(newDx * newDx + newDy * newDy);
+
+          const newMidX = (touches[0].clientX + touches[1].clientX) * 0.5;
+          const newMidY = (touches[0].clientY + touches[1].clientY) * 0.5;
+
+          // Apply pinch zoom directly (no animation for immediate response)
+          if (oldDist > 1 && newDist > 1) {
+            const scale = oldDist / newDist; // >1 = zoom out, <1 = zoom in
+            this.pinchZoom(newMidX, newMidY, scale);
+          }
+
+          // Two-finger pan (midpoint shift)
+          const oldMidX = (this.touch0X + this.touch1X) * 0.5;
+          const oldMidY = (this.touch0Y + this.touch1Y) * 0.5;
           this.pan(newMidX - oldMidX, newMidY - oldMidY);
         }
 
@@ -1560,7 +1585,8 @@ export class Renderer {
   }
 
   private requestRender(): void {
-    if (!this.renderPending && this.dataAnimId === null) {
+    // Skip if already pending or any animation is running (they'll render)
+    if (!this.renderPending && this.dataAnimId === null && !this.zoomAnimating) {
       this.renderPending = true;
       requestAnimationFrame(this.boundRenderCallback);
     }
@@ -1573,7 +1599,13 @@ export class Renderer {
 
   private zoomAt(screenX: number, screenY: number, factor: number): void {
     this.cancelAnimation();
-    const world = this.screenToWorld(screenX, screenY);
+
+    // Compute world position inline to avoid function call overhead
+    const rect = this.getRect();
+    const nx = (screenX - rect.left) / rect.width;
+    const ny = (screenY - rect.top) / rect.height;
+    const worldX = this.centerX + (nx - 0.5) * 2 * this.halfW;
+    const worldY = this.centerY - (ny - 0.5) * 2 * this.halfH;
 
     // Initialize target from current if not animating
     if (!this.zoomAnimating) {
@@ -1584,8 +1616,8 @@ export class Renderer {
     }
 
     // Update target (accumulate zoom)
-    this.zoomTargetCenterX = world.x + (this.zoomTargetCenterX - world.x) * factor;
-    this.zoomTargetCenterY = world.y + (this.zoomTargetCenterY - world.y) * factor;
+    this.zoomTargetCenterX = worldX + (this.zoomTargetCenterX - worldX) * factor;
+    this.zoomTargetCenterY = worldY + (this.zoomTargetCenterY - worldY) * factor;
     this.zoomTargetHalfW *= factor;
     this.zoomTargetHalfH *= factor;
 
@@ -1597,18 +1629,20 @@ export class Renderer {
   }
 
   private zoomAnimFrame(): void {
-    const t = 0.2; // lerp factor (20% per frame)
+    const t = 0.25; // lerp factor (25% per frame — faster convergence)
+    const omt = 1 - t; // 0.75
 
-    this.centerX += (this.zoomTargetCenterX - this.centerX) * t;
-    this.centerY += (this.zoomTargetCenterY - this.centerY) * t;
-    this.halfW += (this.zoomTargetHalfW - this.halfW) * t;
-    this.halfH += (this.zoomTargetHalfH - this.halfH) * t;
+    // Lerp camera toward target (inlined for fewer operations)
+    this.centerX = this.centerX * omt + this.zoomTargetCenterX * t;
+    this.centerY = this.centerY * omt + this.zoomTargetCenterY * t;
+    this.halfW = this.halfW * omt + this.zoomTargetHalfW * t;
+    this.halfH = this.halfH * omt + this.zoomTargetHalfH * t;
     this.projectionDirty = true;
     this.render();
 
-    // Continue if not close enough
-    const epsilon = 0.001;
-    if (Math.abs(this.halfW - this.zoomTargetHalfW) > epsilon * this.zoomTargetHalfW) {
+    // Continue if not close enough (relative epsilon avoids Math.abs)
+    const ratio = this.halfW / this.zoomTargetHalfW;
+    if (ratio < 0.999 || ratio > 1.001) {
       requestAnimationFrame(this.boundZoomAnimFrame);
     } else {
       // Snap to target and stop
@@ -1620,6 +1654,24 @@ export class Renderer {
       this.projectionDirty = true;
       this.render();
     }
+  }
+
+  /** Apply pinch zoom directly (no animation) for immediate touch response. */
+  private pinchZoom(screenX: number, screenY: number, factor: number): void {
+    this.cancelAnimation();
+    const rect = this.getRect();
+    const nx = (screenX - rect.left) / rect.width;
+    const ny = (screenY - rect.top) / rect.height;
+    const worldX = this.centerX + (nx - 0.5) * 2 * this.halfW;
+    const worldY = this.centerY - (ny - 0.5) * 2 * this.halfH;
+
+    // Zoom centered on pinch midpoint
+    this.centerX = worldX + (this.centerX - worldX) * factor;
+    this.centerY = worldY + (this.centerY - worldY) * factor;
+    this.halfW *= factor;
+    this.halfH *= factor;
+    this.projectionDirty = true;
+    // Don't requestRender here - pan() will be called right after and will do it
   }
 
   private pan(screenDx: number, screenDy: number): void {
@@ -1685,7 +1737,9 @@ export class Renderer {
     if (!this.resizeDirty) return;
     this.resizeDirty = false;
 
-    const dpr = window.devicePixelRatio || 1;
+    // Cache DPR (avoid repeated window property access during render)
+    this.cachedDpr = window.devicePixelRatio || 1;
+    const dpr = this.cachedDpr;
     const displayWidth = Math.round(this.canvas.clientWidth * dpr);
     const displayHeight = Math.round(this.canvas.clientHeight * dpr);
 
@@ -1787,9 +1841,14 @@ export class Renderer {
     const projScaleY = this.projScaleY;
     const projOffsetX = this.projOffsetX;
     const projOffsetY = this.projOffsetY;
+    const vpMinX = this.vpMinX;
+    const vpMinY = this.vpMinY;
+    const vpMaxX = this.vpMaxX;
+    const vpMaxY = this.vpMaxY;
 
     // Convert CSS pixel radius limits to world-space
-    const clientW = this.canvas.clientWidth || 1;
+    // Use canvas.width/dpr to avoid clientWidth layout query
+    const clientW = this.canvas.width / this.cachedDpr || 1;
     const worldPerCssPx = (this.halfW * 2) / clientW;
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
@@ -1797,10 +1856,6 @@ export class Renderer {
     // Draw edges behind nodes.
     const drawEdges = this.edgeCount;
     if (drawEdges > 0) {
-      const vpMinX = this.vpMinX;
-      const vpMinY = this.vpMinY;
-      const vpMaxX = this.vpMaxX;
-      const vpMaxY = this.vpMaxY;
       this.useProgram(this.edgeProgram);
       if (
         projScaleX !== this.sentEdgeScaleX ||
@@ -1863,10 +1918,6 @@ export class Renderer {
       this.sentMinRadius = minR;
       this.sentMaxRadius = maxR;
     }
-    const vpMinX = this.vpMinX;
-    const vpMinY = this.vpMinY;
-    const vpMaxX = this.vpMaxX;
-    const vpMaxY = this.vpMaxY;
     if (
       vpMinX !== this.sentNodeVpMinX ||
       vpMinY !== this.sentNodeVpMinY ||
