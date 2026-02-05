@@ -1966,19 +1966,6 @@ export class Renderer {
     }
   }
 
-  private useProgram(program: WebGLProgram): void {
-    if (program !== this.activeProgram) {
-      this.gl.useProgram(program);
-      this.activeProgram = program;
-    }
-  }
-
-  private bindVao(vao: WebGLVertexArrayObject): void {
-    if (vao !== this.activeVao) {
-      this.gl.bindVertexArray(vao);
-      this.activeVao = vao;
-    }
-  }
 
   private updateProjection(): void {
     if (!this.projectionDirty) return;
@@ -2269,7 +2256,11 @@ export class Renderer {
     // Draw edges behind nodes (with frustum culling)
     const drawEdges = this.cullAndUploadEdges(vpMinX, vpMinY, vpMaxX, vpMaxY);
     if (drawEdges > 0) {
-      this.useProgram(this.edgeProgram);
+      // Inline useProgram to avoid function call overhead
+      if (this.edgeProgram !== this.activeProgram) {
+        gl.useProgram(this.edgeProgram);
+        this.activeProgram = this.edgeProgram;
+      }
       if (
         projScaleX !== this.sentEdgeScaleX ||
         projScaleY !== this.sentEdgeScaleY ||
@@ -2306,12 +2297,20 @@ export class Renderer {
         gl.uniform1f(this.edgePxPerWorldLocation, pxPerWorld);
         this.sentEdgePxPerWorld = pxPerWorld;
       }
-      this.bindVao(this.edgeVao);
+      // Inline bindVao to avoid function call overhead
+      if (this.edgeVao !== this.activeVao) {
+        gl.bindVertexArray(this.edgeVao);
+        this.activeVao = this.edgeVao;
+      }
       gl.drawElementsInstanced(gl.TRIANGLES, 51, gl.UNSIGNED_BYTE, 0, drawEdges);
     }
 
     // Draw nodes on top of edges
-    this.useProgram(this.program);
+    // Inline useProgram to avoid function call overhead
+    if (this.program !== this.activeProgram) {
+      gl.useProgram(this.program);
+      this.activeProgram = this.program;
+    }
     if (
       projScaleX !== this.sentNodeScaleX ||
       projScaleY !== this.sentNodeScaleY ||
@@ -2349,7 +2348,11 @@ export class Renderer {
       gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
       this.activeTexture = this.iconAtlasTexture;
     }
-    this.bindVao(this.vao);
+    // Inline bindVao to avoid function call overhead
+    if (this.vao !== this.activeVao) {
+      gl.bindVertexArray(this.vao);
+      this.activeVao = this.vao;
+    }
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
 
     this.onRender?.();
