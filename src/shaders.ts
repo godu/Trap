@@ -101,27 +101,26 @@ out float v_edgeDist;
 flat out float v_halfWidthPx;
 
 void main() {
-  float srcRadius = clamp(a_radii.x, u_minRadius, u_maxRadius);
-  float tgtRadius = clamp(a_radii.y, u_minRadius, u_maxRadius);
-
   vec2 delta = a_target - a_source;
   float lenSq = dot(delta, delta);
 
-  // Degenerate or overlapping nodes — hide
+  // Early exit: degenerate or overlapping nodes
   if (lenSq < 0.000001) {
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     return;
   }
 
+  float srcRadius = clamp(a_radii.x, u_minRadius, u_maxRadius);
+  float tgtRadius = clamp(a_radii.y, u_minRadius, u_maxRadius);
+  float maxR = max(srcRadius, tgtRadius);
+
+  // Compute length for viewport cull (defer direction vectors until after cull)
   float invLen = inversesqrt(lenSq);
   float fullLen = lenSq * invLen;
-  vec2 fwd = delta * invLen;
-  vec2 right = vec2(-fwd.y, fwd.x);
-  float curveDist = fullLen * u_curvature;
+  float curvePad = fullLen * u_curvature;
 
-  // Viewport frustum cull — expand for curve bulge
-  float maxR = max(srcRadius, tgtRadius);
-  float pad = maxR + abs(curveDist);
+  // Early exit: viewport frustum cull (expanded for curve bulge)
+  float pad = maxR + abs(curvePad);
   vec2 emin = min(a_source, a_target) - pad;
   vec2 emax = max(a_source, a_target) + pad;
   if (emax.x < u_viewport.x || emin.x > u_viewport.z ||
@@ -130,11 +129,17 @@ void main() {
     return;
   }
 
+  // Early exit: edges with no visible shaft
   float usableLen = fullLen - srcRadius - tgtRadius;
   if (usableLen < 0.001) {
     gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
     return;
   }
+
+  // Compute direction vectors (only for edges that pass culling)
+  vec2 fwd = delta * invLen;
+  vec2 right = vec2(-fwd.y, fwd.x);
+  float curveDist = curvePad;
 
   v_color = a_color;
 

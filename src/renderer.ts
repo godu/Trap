@@ -377,6 +377,7 @@ export class Renderer {
   private zoomTargetCenterX = 0;
   private zoomTargetCenterY = 0;
   private zoomAnimating = false;
+  private lastZoomRenderTime = 0; // for frame skipping during zoom
 
   // Projection dirty flag (avoid recomputing when camera unchanged)
   private projectionDirty = true;
@@ -405,6 +406,20 @@ export class Renderer {
   private edgeF32: Float32Array | null = null;
   private edgeU32: Uint32Array | null = null;
   private edgeBufU8: Uint8Array | null = null;
+
+  // Edge frustum culling: AABBs and visible buffer
+  private edgeAABBs: Float32Array | null = null; // [minX, minY, maxX, maxY] per edge
+  private edgeAABBCapacity = 0;
+  private visibleEdgeBuf: Uint8Array | null = null;
+  private visibleEdgeCapacity = 0;
+  private visibleEdgeCount = 0;
+  private totalEdgeCount = 0; // total edges before culling
+  // Bounds of all edges (for early-out when viewport contains all)
+  private allEdgesMinX = 0;
+  private allEdgesMinY = 0;
+  private allEdgesMaxX = 0;
+  private allEdgesMaxY = 0;
+  private edgeBufferUploaded = false; // track if full buffer already uploaded
 
   constructor(options: RendererOptions) {
     this.canvas = options.canvas;
@@ -753,6 +768,22 @@ export class Renderer {
     return vao;
   }
 
+  /** Ensure AABB buffer has capacity for n edges */
+  private ensureEdgeAABBBuffer(n: number): void {
+    if (n <= this.edgeAABBCapacity) return;
+    const newCap = Math.max(n, this.edgeAABBCapacity * 2 || 256);
+    this.edgeAABBs = new Float32Array(newCap * 4); // [minX, minY, maxX, maxY] per edge
+    this.edgeAABBCapacity = newCap;
+  }
+
+  /** Ensure visible edge buffer has capacity for n edges */
+  private ensureVisibleEdgeBuffer(n: number): void {
+    if (n <= this.visibleEdgeCapacity) return;
+    const newCap = Math.max(n, this.visibleEdgeCapacity * 2 || 256);
+    this.visibleEdgeBuf = new Uint8Array(newCap * EDGE_STRIDE);
+    this.visibleEdgeCapacity = newCap;
+  }
+
   /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
   private packEdgeBuffer(edges: Edge[]): {
     buffer: Uint8Array;
@@ -764,9 +795,17 @@ export class Renderer {
     for (let i = 0; i < edges.length; i++) sorted[i] = edges[i];
     sorted.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
     this.ensureEdgeBuffer(sorted.length);
+    this.ensureEdgeAABBBuffer(sorted.length);
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
+    const aabb = this.edgeAABBs!;
     let count = 0;
+
+    // Track bounding box of all edges for early-out optimization
+    let allMinX = Infinity;
+    let allMinY = Infinity;
+    let allMaxX = -Infinity;
+    let allMaxY = -Infinity;
 
     for (let i = 0; i < sorted.length; i++) {
       const edge = sorted[i];
@@ -783,9 +822,39 @@ export class Renderer {
       f32[slot + 5] = tgt.radius;
       u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a);
       f32[slot + 7] = edge.width ?? 1.0;
+
+      // Compute AABB for this edge, expanded for curve bulge and radii
+      const dx = tgt.x - src.x;
+      const dy = tgt.y - src.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const curvePad = len * CURVATURE; // curve can bulge this far perpendicular
+      const maxR = Math.max(src.radius, tgt.radius);
+      const pad = maxR + curvePad;
+      const aabbSlot = count * 4;
+      const eMinX = Math.min(src.x, tgt.x) - pad;
+      const eMinY = Math.min(src.y, tgt.y) - pad;
+      const eMaxX = Math.max(src.x, tgt.x) + pad;
+      const eMaxY = Math.max(src.y, tgt.y) + pad;
+      aabb[aabbSlot] = eMinX;
+      aabb[aabbSlot + 1] = eMinY;
+      aabb[aabbSlot + 2] = eMaxX;
+      aabb[aabbSlot + 3] = eMaxY;
+
+      // Update all-edges bounds
+      if (eMinX < allMinX) allMinX = eMinX;
+      if (eMinY < allMinY) allMinY = eMinY;
+      if (eMaxX > allMaxX) allMaxX = eMaxX;
+      if (eMaxY > allMaxY) allMaxY = eMaxY;
+
       count++;
     }
 
+    this.totalEdgeCount = count;
+    this.allEdgesMinX = allMinX;
+    this.allEdgesMinY = allMinY;
+    this.allEdgesMaxX = allMaxX;
+    this.allEdgesMaxY = allMaxY;
+    this.edgeBufferUploaded = false; // mark buffer as needing upload
     return {
       buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE),
       count,
@@ -804,14 +873,8 @@ export class Renderer {
     this.edgeMap.clear();
     for (const e of edges) this.edgeMap.set(e.id, e);
 
-    const { buffer, count } = this.packEdgeBuffer(edges);
-    this.edgeCount = count;
-    if (count > 0) {
-      const gl = this.gl;
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.DYNAMIC_DRAW);
-      this.edgeGpuBytes = buffer.byteLength;
-    }
+    // Pack buffer and compute AABBs; GPU upload deferred to render() for frustum culling
+    this.packEdgeBuffer(edges);
   }
 
   /** Set edges using Edge object array. Renderer resolves node positions. */
@@ -878,14 +941,9 @@ export class Renderer {
 
     // Re-pack edges if we have object edges (positions changed).
     // Skip when animating — interpolateEdges will repack every frame.
+    // GPU upload deferred to render() for frustum culling.
     if (this.edgeObjects.length > 0 && !shouldAnimate) {
-      const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
-      this.edgeCount = count;
-      if (count > 0) {
-        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.DYNAMIC_DRAW);
-        this.edgeGpuBytes = buffer.byteLength;
-      }
+      this.packEdgeBuffer(this.edgeObjects);
     }
 
     if (shouldAnimate) {
@@ -942,13 +1000,8 @@ export class Renderer {
       // Final state: upload actual target data (no interpolation artifacts)
       this.uploadNodeData(this.gl, this.nodes);
       if (this.edgeObjects.length > 0) {
-        const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
-        this.edgeCount = count;
-        if (count > 0) {
-          this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-          this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.DYNAMIC_DRAW);
-          this.edgeGpuBytes = buffer.byteLength;
-        }
+        // Repack edges with final positions; GPU upload deferred to render() for culling
+        this.packEdgeBuffer(this.edgeObjects);
       }
       this.oldNodes = [];
       this.oldNodeMap.clear();
@@ -1046,9 +1099,17 @@ export class Renderer {
     }
 
     this.ensureEdgeBuffer(target.length);
+    this.ensureEdgeAABBBuffer(target.length);
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
+    const aabb = this.edgeAABBs!;
     let count = 0;
+
+    // Track bounding box of all edges for early-out optimization
+    let allMinX = Infinity;
+    let allMinY = Infinity;
+    let allMaxX = -Infinity;
+    let allMaxY = -Infinity;
 
     for (let i = 0; i < target.length; i++) {
       const edge = target[i];
@@ -1077,22 +1138,40 @@ export class Renderer {
         u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a * t);
         f32[slot + 7] = edge.width ?? 1.0;
       }
+
+      // Compute AABB for this edge (positions are interpolated)
+      const dx = tgt.x - src.x;
+      const dy = tgt.y - src.y;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const curvePad = len * CURVATURE;
+      const maxR = Math.max(src.radius, tgt.radius);
+      const pad = maxR + curvePad;
+      const aabbSlot = count * 4;
+      const eMinX = Math.min(src.x, tgt.x) - pad;
+      const eMinY = Math.min(src.y, tgt.y) - pad;
+      const eMaxX = Math.max(src.x, tgt.x) + pad;
+      const eMaxY = Math.max(src.y, tgt.y) + pad;
+      aabb[aabbSlot] = eMinX;
+      aabb[aabbSlot + 1] = eMinY;
+      aabb[aabbSlot + 2] = eMaxX;
+      aabb[aabbSlot + 3] = eMaxY;
+
+      // Update all-edges bounds
+      if (eMinX < allMinX) allMinX = eMinX;
+      if (eMinY < allMinY) allMinY = eMinY;
+      if (eMaxX > allMaxX) allMaxX = eMaxX;
+      if (eMaxY > allMaxY) allMaxY = eMaxY;
+
       count++;
     }
 
-    this.edgeCount = count;
-    if (count > 0) {
-      const byteLen = count * EDGE_STRIDE;
-      const view = this.edgeBufU8!.subarray(0, byteLen);
-      const gl = this.gl;
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      if (byteLen === this.edgeGpuBytes) {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, view);
-      } else {
-        gl.bufferData(gl.ARRAY_BUFFER, view, gl.DYNAMIC_DRAW);
-        this.edgeGpuBytes = byteLen;
-      }
-    }
+    this.totalEdgeCount = count;
+    this.allEdgesMinX = allMinX;
+    this.allEdgesMinY = allMinY;
+    this.allEdgesMaxX = allMaxX;
+    this.allEdgesMaxY = allMaxY;
+    this.edgeBufferUploaded = false;
+    // GPU upload deferred to render() which will cull and upload only visible edges
   }
 
   // --- Hit testing ---
@@ -1624,29 +1703,38 @@ export class Renderer {
   }
 
   private zoomAnimFrame(): void {
+    const now = performance.now();
     const t = 0.25; // lerp factor (25% per frame — faster convergence)
     const omt = 1 - t; // 0.75
 
     // Lerp camera toward target (inlined for fewer operations)
+    // Always update camera state - this is cheap and keeps input responsive
     this.centerX = this.centerX * omt + this.zoomTargetCenterX * t;
     this.centerY = this.centerY * omt + this.zoomTargetCenterY * t;
     this.halfW = this.halfW * omt + this.zoomTargetHalfW * t;
     this.halfH = this.halfH * omt + this.zoomTargetHalfH * t;
     this.projectionDirty = true;
-    this.render();
+
+    // Skip render if not enough time passed (adaptive frame skipping for slow renders)
+    const elapsed = now - this.lastZoomRenderTime;
+    if (elapsed >= 16 || this.lastZoomRenderTime === 0) {
+      this.lastZoomRenderTime = now;
+      this.render();
+    }
 
     // Continue if not close enough (relative epsilon avoids Math.abs)
     const ratio = this.halfW / this.zoomTargetHalfW;
     if (ratio < 0.999 || ratio > 1.001) {
       requestAnimationFrame(this.boundZoomAnimFrame);
     } else {
-      // Snap to target and stop
+      // Snap to target and stop - always render final frame
       this.centerX = this.zoomTargetCenterX;
       this.centerY = this.zoomTargetCenterY;
       this.halfW = this.zoomTargetHalfW;
       this.halfH = this.zoomTargetHalfH;
       this.zoomAnimating = false;
       this.projectionDirty = true;
+      this.lastZoomRenderTime = 0; // reset for next zoom
       this.render();
     }
   }
@@ -1827,6 +1915,89 @@ export class Renderer {
     this.setIconAtlas(canvas, columns, rows);
   }
 
+  /**
+   * Cull edges to viewport and repack visible edges into GPU buffer.
+   * Returns count of edges to draw.
+   * Falls back to legacy mode (no culling) if using raw buffer API.
+   */
+  private cullAndUploadEdges(
+    vpMinX: number,
+    vpMinY: number,
+    vpMaxX: number,
+    vpMaxY: number,
+  ): number {
+    const total = this.totalEdgeCount;
+
+    // Legacy raw buffer mode: no AABBs, draw all edges (already uploaded)
+    if (total === 0) {
+      return this.edgeCount;
+    }
+
+    if (!this.edgeAABBs || !this.edgeBufU8) return 0;
+
+    // Fast path: if viewport contains ALL edges, upload full buffer directly (no copying)
+    if (
+      vpMinX <= this.allEdgesMinX &&
+      vpMinY <= this.allEdgesMinY &&
+      vpMaxX >= this.allEdgesMaxX &&
+      vpMaxY >= this.allEdgesMaxY
+    ) {
+      // All edges are visible - upload full buffer if not already uploaded
+      if (!this.edgeBufferUploaded) {
+        const gl = this.gl;
+        const uploadSize = total * EDGE_STRIDE;
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this.edgeBufU8.subarray(0, uploadSize), gl.DYNAMIC_DRAW);
+        this.edgeGpuBytes = uploadSize;
+        this.edgeBufferUploaded = true;
+      }
+      this.visibleEdgeCount = total;
+      return total;
+    }
+
+    // Mark buffer as needing re-upload next time we see all edges
+    this.edgeBufferUploaded = false;
+
+    this.ensureVisibleEdgeBuffer(total);
+    const aabb = this.edgeAABBs;
+    const srcBuf = this.edgeBufU8;
+    const dstBuf = this.visibleEdgeBuf!;
+    let visibleCount = 0;
+
+    for (let i = 0; i < total; i++) {
+      const aabbIdx = i * 4;
+      const eMinX = aabb[aabbIdx];
+      const eMinY = aabb[aabbIdx + 1];
+      const eMaxX = aabb[aabbIdx + 2];
+      const eMaxY = aabb[aabbIdx + 3];
+
+      // AABB-AABB intersection test
+      if (eMaxX >= vpMinX && eMinX <= vpMaxX && eMaxY >= vpMinY && eMinY <= vpMaxY) {
+        // Visible: copy edge data
+        const srcOffset = i * EDGE_STRIDE;
+        const dstOffset = visibleCount * EDGE_STRIDE;
+        dstBuf.set(srcBuf.subarray(srcOffset, srcOffset + EDGE_STRIDE), dstOffset);
+        visibleCount++;
+      }
+    }
+
+    // Upload visible edges to GPU
+    if (visibleCount > 0) {
+      const gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+      const uploadSize = visibleCount * EDGE_STRIDE;
+      if (uploadSize === this.edgeGpuBytes) {
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, dstBuf.subarray(0, uploadSize));
+      } else {
+        gl.bufferData(gl.ARRAY_BUFFER, dstBuf.subarray(0, uploadSize), gl.DYNAMIC_DRAW);
+        this.edgeGpuBytes = uploadSize;
+      }
+    }
+
+    this.visibleEdgeCount = visibleCount;
+    return visibleCount;
+  }
+
   render(): void {
     const gl = this.gl;
 
@@ -1851,8 +2022,8 @@ export class Renderer {
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
 
-    // Draw edges behind nodes.
-    const drawEdges = this.edgeCount;
+    // Draw edges behind nodes (with frustum culling)
+    const drawEdges = this.cullAndUploadEdges(vpMinX, vpMinY, vpMaxX, vpMaxY);
     if (drawEdges > 0) {
       this.useProgram(this.edgeProgram);
       if (
