@@ -399,6 +399,8 @@ export class Renderer {
   // Reusable sort scratch arrays (avoid .slice() allocation per upload)
   private nodeSortBuf: Node[] = [];
   private edgeSortBuf: Edge[] = [];
+  // Separate buffer for animation (prevents packEdgeBuffer from corrupting sortedTargetEdges)
+  private edgeAnimSortBuf: Edge[] = [];
 
   // Pre-allocated edge buffer pool (grow-by-doubling, reused across frames)
   private edgeBufferCapacity = 0;
@@ -1088,7 +1090,8 @@ export class Renderer {
 
     const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
     if (rawEdges.length > 0) {
-      const sortedEdges = this.edgeSortBuf;
+      // Use separate buffer from packEdgeBuffer to prevent corruption
+      const sortedEdges = this.edgeAnimSortBuf;
       sortedEdges.length = rawEdges.length;
       for (let i = 0; i < rawEdges.length; i++) sortedEdges[i] = rawEdges[i];
       sortedEdges.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
