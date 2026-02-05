@@ -61,6 +61,7 @@ function packPremultiplied(r: number, g: number, b: number, a: number): number {
 const EDGE_STRIDE = 32; // bytes per edge instance
 const CURVATURE = 0.4;
 const CLICK_THRESHOLD = 5; // px
+const DOUBLE_TAP_TIMEOUT = 300; // ms
 
 /**
  * Minimum squared distance from point (px,py) to quadratic Bezier P0→P1→P2.
@@ -326,6 +327,13 @@ export class Renderer {
   private touch0Y = 0;
   private touch1X = 0;
   private touch1Y = 0;
+  private touchStartX = 0;
+  private touchStartY = 0;
+  private touchMoved = false;
+  private tapTimeoutId = 0;
+  private lastTapTime = 0;
+  private lastTapX = 0;
+  private lastTapY = 0;
   private abortController = new AbortController();
 
   // Event callbacks
@@ -347,6 +355,13 @@ export class Renderer {
   // Cached sorted arrays for animation (sort once, reuse every frame)
   private sortedTargetNodes: Node[] | null = null;
   private sortedTargetEdges: Edge[] | null = null;
+
+  // Bound animation callbacks (avoid closure allocation per frame)
+  private boundDataAnimFrame!: (now: number) => void;
+  private boundCameraAnimFrame!: (now: number) => void;
+
+  // Projection dirty flag (avoid recomputing when camera unchanged)
+  private projectionDirty = true;
 
   // Pre-allocated node buffer pool (grow-by-doubling, reused across frames)
   private nodeBufferCapacity = 0;
@@ -483,9 +498,14 @@ export class Renderer {
     this.resizeObserver = new ResizeObserver(() => {
       this.resizeDirty = true;
       this.cachedRect = null;
+      this.projectionDirty = true;
       this.requestRender();
     });
     this.resizeObserver.observe(this.canvas);
+
+    // Bind animation callbacks once (avoid closure allocation per frame)
+    this.boundDataAnimFrame = this.dataAnimFrame.bind(this);
+    this.boundCameraAnimFrame = this.cameraAnimFrame.bind(this);
 
     this.resize();
     this.initCamera();
@@ -506,6 +526,7 @@ export class Renderer {
     this.centerY = view.centerY;
     this.halfW = view.halfW;
     this.halfH = view.halfH;
+    this.projectionDirty = true;
   }
 
   private setupGeometry(gl: WebGL2RenderingContext, nodes: Node[]): WebGLVertexArrayObject {
@@ -565,7 +586,7 @@ export class Renderer {
   }
 
   private ensureNodeBuffer(count: number): void {
-    if (count <= this.nodeBufferCapacity) return;
+    if (this.nodeU8 && count <= this.nodeBufferCapacity) return;
     let cap = this.nodeBufferCapacity || 64;
     while (cap < count) cap *= 2;
     this.nodeArrayBuf = new ArrayBuffer(cap * 20);
@@ -575,7 +596,7 @@ export class Renderer {
   }
 
   private ensureEdgeBuffer(count: number): void {
-    if (count <= this.edgeBufferCapacity) return;
+    if (this.edgeBufU8 && count <= this.edgeBufferCapacity) return;
     let cap = this.edgeBufferCapacity || 64;
     while (cap < count) cap *= 2;
     this.edgeArrayBuf = new ArrayBuffer(cap * EDGE_STRIDE);
@@ -862,50 +883,61 @@ export class Renderer {
     this.dataAnimStart = performance.now();
 
     // Sort targets once at animation start (zIndex order doesn't change mid-animation)
+    // Reuse sort buffers to avoid allocation
     const rawNodes = this.targetNodes.length > 0 ? this.targetNodes : this.nodes;
-    this.sortedTargetNodes = rawNodes.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const sortedNodes = this.nodeSortBuf;
+    sortedNodes.length = rawNodes.length;
+    for (let i = 0; i < rawNodes.length; i++) sortedNodes[i] = rawNodes[i];
+    sortedNodes.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    this.sortedTargetNodes = sortedNodes;
+
     const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
-    this.sortedTargetEdges =
-      rawEdges.length > 0
-        ? rawEdges.slice().sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0))
-        : null;
+    if (rawEdges.length > 0) {
+      const sortedEdges = this.edgeSortBuf;
+      sortedEdges.length = rawEdges.length;
+      for (let i = 0; i < rawEdges.length; i++) sortedEdges[i] = rawEdges[i];
+      sortedEdges.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+      this.sortedTargetEdges = sortedEdges;
+    } else {
+      this.sortedTargetEdges = null;
+    }
 
-    const animate = (now: number): void => {
-      const elapsed = now - this.dataAnimStart;
-      const rawT = Math.min(elapsed / this.dataAnimDuration, 1);
-      const t = this.dataAnimEasing(rawT);
+    this.dataAnimId = requestAnimationFrame(this.boundDataAnimFrame);
+  }
 
-      this.interpolateNodes(t);
-      this.interpolateEdges(t);
-      this.render();
+  private dataAnimFrame(now: number): void {
+    const elapsed = now - this.dataAnimStart;
+    const rawT = Math.min(elapsed / this.dataAnimDuration, 1);
+    const t = this.dataAnimEasing(rawT);
 
-      if (rawT < 1) {
-        this.dataAnimId = requestAnimationFrame(animate);
-      } else {
-        this.dataAnimId = null;
-        // Final state: upload actual target data (no interpolation artifacts)
-        this.uploadNodeData(this.gl, this.nodes);
-        if (this.edgeObjects.length > 0) {
-          const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
-          this.edgeCount = count;
-          if (count > 0) {
-            this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-            this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
-            this.edgeGpuBytes = buffer.byteLength;
-          }
+    this.interpolateNodes(t);
+    this.interpolateEdges(t);
+    this.render();
+
+    if (rawT < 1) {
+      this.dataAnimId = requestAnimationFrame(this.boundDataAnimFrame);
+    } else {
+      this.dataAnimId = null;
+      // Final state: upload actual target data (no interpolation artifacts)
+      this.uploadNodeData(this.gl, this.nodes);
+      if (this.edgeObjects.length > 0) {
+        const { buffer, count } = this.packEdgeBuffer(this.edgeObjects);
+        this.edgeCount = count;
+        if (count > 0) {
+          this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+          this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
+          this.edgeGpuBytes = buffer.byteLength;
         }
-        this.oldNodes = [];
-        this.oldNodeMap.clear();
-        this.targetNodes = [];
-        this.oldEdges = [];
-        this.oldEdgeMap.clear();
-        this.targetEdges = [];
-        this.sortedTargetNodes = null;
-        this.sortedTargetEdges = null;
       }
-    };
-
-    this.dataAnimId = requestAnimationFrame(animate);
+      this.oldNodes = [];
+      this.oldNodeMap.clear();
+      this.targetNodes = [];
+      this.oldEdges = [];
+      this.oldEdgeMap.clear();
+      this.targetEdges = [];
+      this.sortedTargetNodes = null;
+      this.sortedTargetEdges = null;
+    }
   }
 
   private interpolateNodes(t: number): void {
@@ -914,6 +946,7 @@ export class Renderer {
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
 
+    const omt = 1 - t;
     for (let i = 0; i < target.length; i++) {
       const node = target[i];
       const old = this.oldNodeMap.get(node.id);
@@ -921,19 +954,14 @@ export class Renderer {
       const bi = i * 20;
 
       if (old) {
-        f32[fi] = lerp(old.x, node.x, t);
-        f32[fi + 1] = lerp(old.y, node.y, t);
-        const oldOpacity = old.opacity ?? 1.0;
-        const newOpacity = node.opacity ?? 1.0;
-        const opacity = lerp(oldOpacity, newOpacity, t);
-        const oldR = lerp(old.r, node.r, t);
-        const oldG = lerp(old.g, node.g, t);
-        const oldB = lerp(old.b, node.b, t);
-        u8[bi + 8] = (oldR * 255 + 0.5) | 0;
-        u8[bi + 9] = (oldG * 255 + 0.5) | 0;
-        u8[bi + 10] = (oldB * 255 + 0.5) | 0;
+        f32[fi] = old.x * omt + node.x * t;
+        f32[fi + 1] = old.y * omt + node.y * t;
+        const opacity = (old.opacity ?? 1.0) * omt + (node.opacity ?? 1.0) * t;
+        u8[bi + 8] = ((old.r * omt + node.r * t) * 255 + 0.5) | 0;
+        u8[bi + 9] = ((old.g * omt + node.g * t) * 255 + 0.5) | 0;
+        u8[bi + 10] = ((old.b * omt + node.b * t) * 255 + 0.5) | 0;
         u8[bi + 11] = (opacity * 255 + 0.5) | 0;
-        f32[fi + 3] = lerp(old.radius, node.radius, t);
+        f32[fi + 3] = old.radius * omt + node.radius * t;
       } else {
         // New node — fade in
         f32[fi] = node.x;
@@ -970,6 +998,7 @@ export class Renderer {
     const interpNodeMap = this.interpNodeMap;
     interpNodeMap.clear();
     const pool = this.interpNodePool;
+    const omt = 1 - t;
     let poolIdx = 0;
     for (const node of targetNodes) {
       // Grow pool on demand, reuse existing objects
@@ -983,9 +1012,9 @@ export class Renderer {
       poolIdx++;
       const old = this.oldNodeMap.get(node.id);
       if (old) {
-        obj.x = lerp(old.x, node.x, t);
-        obj.y = lerp(old.y, node.y, t);
-        obj.radius = lerp(old.radius, node.radius, t);
+        obj.x = old.x * omt + node.x * t;
+        obj.y = old.y * omt + node.y * t;
+        obj.radius = old.radius * omt + node.radius * t;
       } else {
         obj.x = node.x;
         obj.y = node.y;
@@ -1015,13 +1044,12 @@ export class Renderer {
       f32[slot + 5] = tgt.radius;
 
       if (old) {
-        const a = lerp(old.a, edge.a, t);
-        const r = lerp(old.r, edge.r, t);
-        const g = lerp(old.g, edge.g, t);
-        const b = lerp(old.b, edge.b, t);
-        const w = lerp(old.width ?? 1.0, edge.width ?? 1.0, t);
+        const a = old.a * omt + edge.a * t;
+        const r = old.r * omt + edge.r * t;
+        const g = old.g * omt + edge.g * t;
+        const b = old.b * omt + edge.b * t;
+        f32[slot + 7] = (old.width ?? 1.0) * omt + (edge.width ?? 1.0) * t;
         u32[slot + 6] = packPremultiplied(r, g, b, a);
-        f32[slot + 7] = w;
       } else {
         // New edge — fade in
         u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a * t);
@@ -1173,7 +1201,7 @@ export class Renderer {
           const dy = e.clientY - this.dragStartY;
           const dist = Math.sqrt(dx * dx + dy * dy);
           if (dist < CLICK_THRESHOLD) {
-            this.handleClick(e);
+            this.handleClick(e.clientX, e.clientY, e);
           }
           this.isDragging = false;
           canvas.style.cursor = "default";
@@ -1185,7 +1213,7 @@ export class Renderer {
     canvas.addEventListener(
       "dblclick",
       (e) => {
-        this.handleDblClick(e);
+        this.handleDblClick(e.clientX, e.clientY, e);
       },
       { signal },
     );
@@ -1196,6 +1224,13 @@ export class Renderer {
       (e) => {
         e.preventDefault();
         this.storeTouches(e.touches);
+        if (e.touches.length === 1) {
+          this.touchStartX = e.touches[0].clientX;
+          this.touchStartY = e.touches[0].clientY;
+          this.touchMoved = false;
+        } else {
+          this.touchMoved = true;
+        }
       },
       { signal, passive: false },
     );
@@ -1205,6 +1240,14 @@ export class Renderer {
       (e) => {
         e.preventDefault();
         if (this.touchCount === 0) return;
+
+        if (!this.touchMoved && e.touches.length === 1) {
+          const dx = e.touches[0].clientX - this.touchStartX;
+          const dy = e.touches[0].clientY - this.touchStartY;
+          if (dx * dx + dy * dy > CLICK_THRESHOLD * CLICK_THRESHOLD) {
+            this.touchMoved = true;
+          }
+        }
 
         const touches = e.touches;
         const prevCount = this.touchCount;
@@ -1236,14 +1279,47 @@ export class Renderer {
     canvas.addEventListener(
       "touchend",
       (e) => {
+        if (e.touches.length === 0 && !this.touchMoved && e.changedTouches.length === 1) {
+          const cx = e.changedTouches[0].clientX;
+          const cy = e.changedTouches[0].clientY;
+          const now = performance.now();
+          const dt = now - this.lastTapTime;
+          const ddx = cx - this.lastTapX;
+          const ddy = cy - this.lastTapY;
+          const tapDist = Math.sqrt(ddx * ddx + ddy * ddy);
+
+          if (dt < DOUBLE_TAP_TIMEOUT && tapDist < CLICK_THRESHOLD) {
+            // Double tap
+            clearTimeout(this.tapTimeoutId);
+            this.lastTapTime = 0;
+            this.handleDblClick(cx, cy, e);
+          } else {
+            this.lastTapTime = now;
+            this.lastTapX = cx;
+            this.lastTapY = cy;
+            const hasDblClick =
+              this.onNodeDblClick || this.onEdgeDblClick || this.onBackgroundDblClick;
+            if (hasDblClick) {
+              this.tapTimeoutId = window.setTimeout(() => {
+                this.handleClick(cx, cy, e);
+              }, DOUBLE_TAP_TIMEOUT);
+            } else {
+              this.handleClick(cx, cy, e);
+            }
+          }
+        }
         this.storeTouches(e.touches);
       },
       { signal },
     );
   }
 
-  private handleClick(e: MouseEvent): void {
-    const world = this.screenToWorld(e.clientX, e.clientY);
+  private handleClick(
+    clientX: number,
+    clientY: number,
+    originalEvent: MouseEvent | TouchEvent,
+  ): void {
+    const world = this.screenToWorld(clientX, clientY);
     const worldX = world.x;
     const worldY = world.y;
 
@@ -1255,7 +1331,7 @@ export class Renderer {
         node,
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
       return;
     }
@@ -1268,7 +1344,7 @@ export class Renderer {
         edge,
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
       return;
     }
@@ -1278,13 +1354,17 @@ export class Renderer {
         type: "click",
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
     }
   }
 
-  private handleDblClick(e: MouseEvent): void {
-    const world = this.screenToWorld(e.clientX, e.clientY);
+  private handleDblClick(
+    clientX: number,
+    clientY: number,
+    originalEvent: MouseEvent | TouchEvent,
+  ): void {
+    const world = this.screenToWorld(clientX, clientY);
     const worldX = world.x;
     const worldY = world.y;
 
@@ -1296,7 +1376,7 @@ export class Renderer {
         node,
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
       return;
     }
@@ -1309,7 +1389,7 @@ export class Renderer {
         edge,
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
       return;
     }
@@ -1319,7 +1399,7 @@ export class Renderer {
         type: "dblclick",
         worldX,
         worldY,
-        originalEvent: e,
+        originalEvent,
       });
     }
   }
@@ -1475,6 +1555,7 @@ export class Renderer {
     this.centerY = world.y + (this.centerY - world.y) * factor;
     this.halfW *= factor;
     this.halfH *= factor;
+    this.projectionDirty = true;
     this.requestRender();
   }
 
@@ -1483,6 +1564,7 @@ export class Renderer {
     const rect = this.getRect();
     this.centerX -= (screenDx / rect.width) * 2 * this.halfW;
     this.centerY += (screenDy / rect.height) * 2 * this.halfH;
+    this.projectionDirty = true;
     this.requestRender();
   }
 
@@ -1496,6 +1578,7 @@ export class Renderer {
       this.centerY = view.centerY;
       this.halfW = view.halfW;
       this.halfH = view.halfH;
+      this.projectionDirty = true;
       this.render();
       return;
     }
@@ -1512,27 +1595,27 @@ export class Renderer {
     this.animStartTime = performance.now();
 
     this.cancelAnimation();
+    this.animationId = requestAnimationFrame(this.boundCameraAnimFrame);
+  }
 
-    const animate = (now: number): void => {
-      const elapsed = now - this.animStartTime;
-      const t = Math.min(elapsed / this.animDuration, 1);
-      const e = this.dataAnimEasing(t);
+  private cameraAnimFrame(now: number): void {
+    const elapsed = now - this.animStartTime;
+    const t = Math.min(elapsed / this.animDuration, 1);
+    const e = this.dataAnimEasing(t);
 
-      this.centerX = lerp(this.animFrom.centerX, this.animTo.centerX, e);
-      this.centerY = lerp(this.animFrom.centerY, this.animTo.centerY, e);
-      this.halfW = lerp(this.animFrom.halfW, this.animTo.halfW, e);
-      this.halfH = lerp(this.animFrom.halfH, this.animTo.halfH, e);
+    this.centerX = lerp(this.animFrom.centerX, this.animTo.centerX, e);
+    this.centerY = lerp(this.animFrom.centerY, this.animTo.centerY, e);
+    this.halfW = lerp(this.animFrom.halfW, this.animTo.halfW, e);
+    this.halfH = lerp(this.animFrom.halfH, this.animTo.halfH, e);
+    this.projectionDirty = true;
 
-      this.render();
+    this.render();
 
-      if (t < 1) {
-        this.animationId = requestAnimationFrame(animate);
-      } else {
-        this.animationId = null;
-      }
-    };
-
-    this.animationId = requestAnimationFrame(animate);
+    if (t < 1) {
+      this.animationId = requestAnimationFrame(this.boundCameraAnimFrame);
+    } else {
+      this.animationId = null;
+    }
   }
 
   resize(): void {
@@ -1566,6 +1649,8 @@ export class Renderer {
   }
 
   private updateProjection(): void {
+    if (!this.projectionDirty) return;
+    this.projectionDirty = false;
     this.projScaleX = 1 / this.halfW;
     this.projScaleY = 1 / this.halfH;
     this.projOffsetX = -this.centerX / this.halfW;
@@ -1708,6 +1793,7 @@ export class Renderer {
   }
 
   destroy(): void {
+    clearTimeout(this.tapTimeoutId);
     this.abortController.abort();
     this.cancelAnimation();
     if (this.dataAnimId !== null) {
