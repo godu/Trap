@@ -411,6 +411,7 @@ export class Renderer {
   private edgeAABBs: Float32Array | null = null; // [minX, minY, maxX, maxY] per edge
   private edgeAABBCapacity = 0;
   private visibleEdgeBuf: Uint8Array | null = null;
+  private visibleEdgeBufU32: Uint32Array | null = null; // 32-bit view for fast copying
   private visibleEdgeCapacity = 0;
   private visibleEdgeIndices: Uint32Array | null = null; // indices of visible edges for sorting
   private visibleEdgeCount = 0;
@@ -800,6 +801,7 @@ export class Renderer {
     if (n <= this.visibleEdgeCapacity) return;
     const newCap = Math.max(n, this.visibleEdgeCapacity * 2 || 256);
     this.visibleEdgeBuf = new Uint8Array(newCap * EDGE_STRIDE);
+    this.visibleEdgeBufU32 = new Uint32Array(this.visibleEdgeBuf.buffer);
     this.visibleEdgeCapacity = newCap;
   }
 
@@ -2090,8 +2092,10 @@ export class Renderer {
 
     this.ensureVisibleEdgeBuffer(total);
     const aabb = this.edgeAABBs;
-    const srcBuf = this.edgeBufU8;
-    const dstBuf = this.visibleEdgeBuf!;
+    // Use 32-bit views for faster copying (8 words per edge instead of 32 bytes)
+    const srcU32 = this.edgeU32!;
+    const dstU32 = this.visibleEdgeBufU32!;
+    const dstU8 = this.visibleEdgeBuf!; // for GPU upload
     let visibleCount = 0;
 
     // Time budget: 8ms during motion to maintain 60fps, unlimited when idle
@@ -2169,12 +2173,19 @@ export class Renderer {
       const sortedIndices = indices.subarray(0, indexCount);
       sortedIndices.sort();
 
-      // Copy edges in sorted order
+      // Copy edges in sorted order using 32-bit words (8 per edge, avoids subarray allocation)
       for (let k = 0; k < indexCount; k++) {
         const i = sortedIndices[k];
-        const srcOffset = i * EDGE_STRIDE;
-        const dstOffset = visibleCount * EDGE_STRIDE;
-        dstBuf.set(srcBuf.subarray(srcOffset, srcOffset + EDGE_STRIDE), dstOffset);
+        const src = i << 3; // i * 8 (8 uint32 per edge)
+        const dst = visibleCount << 3;
+        dstU32[dst] = srcU32[src];
+        dstU32[dst + 1] = srcU32[src + 1];
+        dstU32[dst + 2] = srcU32[src + 2];
+        dstU32[dst + 3] = srcU32[src + 3];
+        dstU32[dst + 4] = srcU32[src + 4];
+        dstU32[dst + 5] = srcU32[src + 5];
+        dstU32[dst + 6] = srcU32[src + 6];
+        dstU32[dst + 7] = srcU32[src + 7];
         visibleCount++;
       }
     } else {
@@ -2193,10 +2204,17 @@ export class Renderer {
 
         // AABB-AABB intersection test
         if (eMaxX >= vpMinX && eMinX <= vpMaxX && eMaxY >= vpMinY && eMinY <= vpMaxY) {
-          // Visible: copy edge data
-          const srcOffset = i * EDGE_STRIDE;
-          const dstOffset = visibleCount * EDGE_STRIDE;
-          dstBuf.set(srcBuf.subarray(srcOffset, srcOffset + EDGE_STRIDE), dstOffset);
+          // Visible: copy edge data using 32-bit words (avoids subarray allocation)
+          const src = i << 3; // i * 8 (8 uint32 per edge)
+          const dst = visibleCount << 3;
+          dstU32[dst] = srcU32[src];
+          dstU32[dst + 1] = srcU32[src + 1];
+          dstU32[dst + 2] = srcU32[src + 2];
+          dstU32[dst + 3] = srcU32[src + 3];
+          dstU32[dst + 4] = srcU32[src + 4];
+          dstU32[dst + 5] = srcU32[src + 5];
+          dstU32[dst + 6] = srcU32[src + 6];
+          dstU32[dst + 7] = srcU32[src + 7];
           visibleCount++;
         }
       }
@@ -2208,9 +2226,9 @@ export class Renderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
       const uploadSize = visibleCount * EDGE_STRIDE;
       if (uploadSize === this.edgeGpuBytes) {
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, dstBuf.subarray(0, uploadSize));
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, dstU8.subarray(0, uploadSize));
       } else {
-        gl.bufferData(gl.ARRAY_BUFFER, dstBuf.subarray(0, uploadSize), gl.DYNAMIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, dstU8.subarray(0, uploadSize), gl.DYNAMIC_DRAW);
         this.edgeGpuBytes = uploadSize;
       }
     }
