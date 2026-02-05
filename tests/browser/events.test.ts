@@ -8,6 +8,9 @@ import {
   simulateClick,
   simulateDblClick,
   simulateHover,
+  simulateTouchTap,
+  simulateTouchDoubleTap,
+  simulateTouchDrag,
   threeNodeGraph,
 } from "./helpers";
 import type { Renderer } from "../../src/index";
@@ -198,6 +201,119 @@ describe("Events", () => {
 
       simulateHover(5, 5);
       expect(onEdgeHoverLeave).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("touch tap", () => {
+    it("fires onNodeClick after timeout when dblclick callbacks exist", () => {
+      vi.useFakeTimers();
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onNodeClick = vi.fn();
+      const onNodeDblClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, { edges, onNodeClick, onNodeDblClick });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      const posA = nodeScreenPos(nodes[0], nodes, canvas);
+      simulateTouchTap(canvas, posA.x, posA.y);
+
+      // Should not fire immediately since dblclick callback exists
+      expect(onNodeClick).not.toHaveBeenCalled();
+
+      vi.advanceTimersByTime(300);
+      expect(onNodeClick).toHaveBeenCalledOnce();
+      expect(onNodeClick.mock.calls[0][0].nodeId).toBe("a");
+      vi.useRealTimers();
+    });
+
+    it("fires onNodeClick immediately when no dblclick callbacks", () => {
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onNodeClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, { edges, onNodeClick });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      const posA = nodeScreenPos(nodes[0], nodes, canvas);
+      simulateTouchTap(canvas, posA.x, posA.y);
+
+      expect(onNodeClick).toHaveBeenCalledOnce();
+      expect(onNodeClick.mock.calls[0][0].nodeId).toBe("a");
+    });
+
+    it("fires onBackgroundClick on empty space", () => {
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onBackgroundClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, { edges, onBackgroundClick });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      simulateTouchTap(canvas, 5, 5);
+      expect(onBackgroundClick).toHaveBeenCalledOnce();
+    });
+
+    it("does not fire click when touch moves beyond threshold", () => {
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onNodeClick = vi.fn();
+      const onBackgroundClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, { edges, onNodeClick, onBackgroundClick });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      const posA = nodeScreenPos(nodes[0], nodes, canvas);
+      simulateTouchDrag(canvas, posA.x, posA.y, posA.x + 20, posA.y + 20);
+
+      expect(onNodeClick).not.toHaveBeenCalled();
+      expect(onBackgroundClick).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("touch double-tap", () => {
+    it("fires onNodeDblClick immediately and suppresses onNodeClick", () => {
+      vi.useFakeTimers();
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onNodeClick = vi.fn();
+      const onNodeDblClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, { edges, onNodeClick, onNodeDblClick });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      const posB = nodeScreenPos(nodes[1], nodes, canvas);
+      simulateTouchDoubleTap(canvas, posB.x, posB.y);
+
+      expect(onNodeDblClick).toHaveBeenCalledOnce();
+      expect(onNodeDblClick.mock.calls[0][0].nodeId).toBe("b");
+
+      // Advance past timeout — click should NOT have fired
+      vi.advanceTimersByTime(300);
+      expect(onNodeClick).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
+    it("fires onBackgroundDblClick on empty space", () => {
+      vi.useFakeTimers();
+      canvas = createTestCanvas();
+      const { nodes, edges } = threeNodeGraph();
+      const onBackgroundDblClick = vi.fn();
+      const onBackgroundClick = vi.fn();
+      renderer = createTestRenderer(canvas, nodes, {
+        edges,
+        onBackgroundDblClick,
+        onBackgroundClick,
+      });
+      renderer.fitToNodes(0);
+      renderer.render();
+
+      simulateTouchDoubleTap(canvas, 5, 5);
+
+      expect(onBackgroundDblClick).toHaveBeenCalledOnce();
+      vi.advanceTimersByTime(300);
+      expect(onBackgroundClick).not.toHaveBeenCalled();
+      vi.useRealTimers();
     });
   });
 });

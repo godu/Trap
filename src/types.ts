@@ -30,7 +30,7 @@ export interface NodeEvent {
   node: Node;
   worldX: number;
   worldY: number;
-  originalEvent: MouseEvent;
+  originalEvent: MouseEvent | TouchEvent;
 }
 
 export interface EdgeEvent {
@@ -39,14 +39,14 @@ export interface EdgeEvent {
   edge: Edge;
   worldX: number;
   worldY: number;
-  originalEvent: MouseEvent;
+  originalEvent: MouseEvent | TouchEvent;
 }
 
 export interface BackgroundEvent {
   type: string;
   worldX: number;
   worldY: number;
-  originalEvent: MouseEvent;
+  originalEvent: MouseEvent | TouchEvent;
 }
 
 export interface RendererOptions {
