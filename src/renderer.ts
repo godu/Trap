@@ -1077,7 +1077,9 @@ export class Renderer {
     if (this.dataAnimId !== null) {
       cancelAnimationFrame(this.dataAnimId);
     }
-    this.dataAnimStart = performance.now();
+    // Use -1 to signal "not started" — will be set on first frame using RAF timestamp
+    // to avoid negative elapsed time when animation starts during another frame's processing
+    this.dataAnimStart = -1;
 
     // Sort targets once at animation start (zIndex order doesn't change mid-animation)
     // Reuse sort buffers to avoid allocation
@@ -1104,6 +1106,8 @@ export class Renderer {
   }
 
   private dataAnimFrame(now: number): void {
+    // Initialize start time on first frame using RAF timestamp (avoids negative elapsed)
+    if (this.dataAnimStart < 0) this.dataAnimStart = now;
     const elapsed = now - this.dataAnimStart;
     const rawT = Math.min(elapsed / this.dataAnimDuration, 1);
     const t = this.dataAnimEasing(rawT);
