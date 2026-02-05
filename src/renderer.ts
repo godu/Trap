@@ -1326,14 +1326,13 @@ export class Renderer {
       const halfW = (edge.width ?? 1.0) / 2;
       const edgeTol = baseTol + halfW;
 
-      // Compute Bezier control point
+      // Compute Bezier control point (simplified: len cancels in (-dy/len)*len*CURVATURE)
       const dx = tgt.x - src.x;
       const dy = tgt.y - src.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      if (len < 0.0001) continue;
-      const curveDist = len * CURVATURE;
-      const ctrlX = (src.x + tgt.x) * 0.5 + (-dy / len) * curveDist;
-      const ctrlY = (src.y + tgt.y) * 0.5 + (dx / len) * curveDist;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq < 0.00000001) continue; // skip degenerate edges
+      const ctrlX = (src.x + tgt.x) * 0.5 - dy * CURVATURE;
+      const ctrlY = (src.y + tgt.y) * 0.5 + dx * CURVATURE;
 
       // Tight bbox — Bezier convex hull + edge width + pixel tolerance
       const minX = Math.min(src.x, tgt.x, ctrlX) - edgeTol;
