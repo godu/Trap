@@ -916,10 +916,13 @@ export class Renderer {
       f32[slot + 7] = edge.width ?? 1.0;
 
       // Compute AABB for this edge, expanded for curve bulge and radii
+      // Use Manhattan distance * CURVATURE as conservative approximation (avoids sqrt)
+      // Manhattan >= Euclidean, so this overestimates padding by up to 41% for diagonals
       const dx = tgt.x - src.x;
       const dy = tgt.y - src.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const curvePad = len * CURVATURE; // curve can bulge this far perpendicular
+      const absDx = dx < 0 ? -dx : dx;
+      const absDy = dy < 0 ? -dy : dy;
+      const curvePad = (absDx + absDy) * CURVATURE;
       const maxR = Math.max(src.radius, tgt.radius);
       const pad = maxR + curvePad;
       const aabbSlot = count * 4;
@@ -1239,10 +1242,12 @@ export class Renderer {
       }
 
       // Compute AABB for this edge (positions are interpolated)
+      // Use Manhattan distance * CURVATURE as conservative approximation (avoids sqrt)
       const dx = tgt.x - src.x;
       const dy = tgt.y - src.y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const curvePad = len * CURVATURE;
+      const absDx = dx < 0 ? -dx : dx;
+      const absDy = dy < 0 ? -dy : dy;
+      const curvePad = (absDx + absDy) * CURVATURE;
       const maxR = Math.max(src.radius, tgt.radius);
       const pad = maxR + curvePad;
       const aabbSlot = count * 4;
