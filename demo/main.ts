@@ -1,5 +1,5 @@
 import { Renderer } from "../src/index";
-import type { Node, Edge, ResizeMode } from "../src/index";
+import type { Node, Edge } from "../src/index";
 import { initFpsCounter, countRenderFrame } from "./fps";
 import smallResourcesUrl from "./small.minimal-resources.json?url";
 import smallEdgesUrl from "./small.minimal-edges.json?url";
@@ -276,15 +276,4 @@ document.getElementById("dataset-toggle")?.addEventListener("click", (e) => {
   }
 
   loadDataset(dataset);
-});
-
-document.getElementById("resize-toggle")?.addEventListener("click", (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
-    "button[data-resize]",
-  );
-  if (!btn) return;
-  for (const b of btn.parentElement!.querySelectorAll("button")) {
-    b.setAttribute("aria-pressed", String(b === btn));
-  }
-  renderer.setResizeMode(btn.dataset.resize as ResizeMode);
 });
