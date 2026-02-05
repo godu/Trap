@@ -51,25 +51,26 @@ out vec4 outColor;
 
 void main() {
   float dist = dot(v_uv, v_uv);
-  if (dist > 1.0) discard;
-  float alpha = 1.0 - smoothstep(0.9, 1.0, dist);
+  // Use step() + smoothstep() instead of discard to preserve early-z on some GPUs
+  float inside = step(dist, 1.0);
+  float alpha = inside * (1.0 - smoothstep(0.9, 1.0, dist));
   float a = alpha * v_color.a;
-  vec4 base = vec4(v_color.rgb * a, a);
+  vec3 rgb = v_color.rgb * a;
 
-  if (v_iconIndex > 0.5 && u_atlasColumns > 0.0) {
-    vec2 iconUV = v_uv * 0.5 + 0.5;
-    float idx = v_iconIndex - 1.0;
-    float col = mod(idx, u_atlasColumns);
-    float row = floor(idx / u_atlasColumns);
-    vec2 atlasUV = vec2(
-      (col + iconUV.x) / u_atlasColumns,
-      (row + 1.0 - iconUV.y) / u_atlasRows
-    );
-    float iconAlpha = texture(u_iconAtlas, atlasUV).a;
-    base = vec4(base.rgb + iconAlpha * a, base.a);
-  }
+  // Icon sampling: branchless via step mask
+  // Hoist max() to avoid redundant calls (compiler may not optimize across divisions)
+  float cols = max(u_atlasColumns, 1.0);
+  float rows = max(u_atlasRows, 1.0);
+  float hasIcon = step(0.5, v_iconIndex) * step(0.5, u_atlasColumns);
+  vec2 iconUV = v_uv * 0.5 + 0.5;
+  float idx = v_iconIndex - 1.0;
+  float col = mod(idx, cols);
+  float row = floor(idx / cols);
+  vec2 atlasUV = vec2((col + iconUV.x) / cols, (row + 1.0 - iconUV.y) / rows);
+  float iconAlpha = texture(u_iconAtlas, atlasUV).a * hasIcon;
+  rgb += iconAlpha * a;
 
-  outColor = base;
+  outColor = vec4(rgb, a);
 }
 `;
 
@@ -196,7 +197,7 @@ void main() {
 `;
 
 export const edgeFragmentSource = `#version 300 es
-precision mediump float;
+precision lowp float;
 
 flat in vec4 v_color;
 in float v_edgeDist;
