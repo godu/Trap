@@ -1,4 +1,4 @@
-import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent, ResizeMode } from "./types";
+import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent } from "./types";
 import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
 import { buildIconAtlas } from "./atlas";
@@ -342,9 +342,6 @@ export class Renderer {
   // Resize tracking
   private resizeDirty = true;
   private resizeObserver: ResizeObserver;
-  private resizeMode: ResizeMode = "fixed-height";
-  private prevCanvasW = 0;
-  private prevCanvasH = 0;
 
   // Cached layout values
   private cachedRect: DOMRect | null = null;
@@ -513,7 +510,7 @@ export class Renderer {
 
     this.minScreenRadius = options.minScreenRadius ?? 2;
     this.maxScreenRadius = options.maxScreenRadius ?? 40;
-    if (options.resizeMode) this.resizeMode = options.resizeMode;
+
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
@@ -1937,10 +1934,6 @@ export class Renderer {
     this.requestRender();
   }
 
-  /** Change the resize strategy at runtime. */
-  setResizeMode(mode: ResizeMode): void {
-    this.resizeMode = mode;
-  }
 
   fitToNodes(duration = 300): void {
     this.resize();
@@ -2008,49 +2001,18 @@ export class Renderer {
     const displayHeight = Math.round(this.canvas.clientHeight * dpr);
 
     if (this.canvas.width !== displayWidth || this.canvas.height !== displayHeight) {
-      const oldW = this.prevCanvasW;
-      const oldH = this.prevCanvasH;
+      // Preserve the largest inscribed square across aspect changes
+      const s = Math.min(this.halfW, this.halfH);
       const newAspect = displayWidth / displayHeight;
-
-      switch (this.resizeMode) {
-        case "pixel-density":
-          if (oldW > 0 && oldH > 0) {
-            this.halfW *= displayWidth / oldW;
-            this.halfH *= displayHeight / oldH;
-          } else {
-            this.halfW = this.halfH * newAspect;
-          }
-          break;
-
-        case "preserve-area":
-          if (oldW > 0 && oldH > 0) {
-            const area = this.halfW * this.halfH;
-            this.halfH = Math.sqrt(area / newAspect);
-            this.halfW = this.halfH * newAspect;
-          } else {
-            this.halfW = this.halfH * newAspect;
-          }
-          break;
-
-        case "fit":
-          // Just update aspect; fitToNodes called after canvas update
-          this.halfW = this.halfH * newAspect;
-          break;
-
-        case "fixed-height":
-        default:
-          this.halfW = this.halfH * newAspect;
-          break;
+      if (newAspect >= 1) {
+        this.halfH = s;
+        this.halfW = s * newAspect;
+      } else {
+        this.halfW = s;
+        this.halfH = s / newAspect;
       }
-
       this.canvas.width = displayWidth;
       this.canvas.height = displayHeight;
-      this.prevCanvasW = displayWidth;
-      this.prevCanvasH = displayHeight;
-
-      if (this.resizeMode === "fit") {
-        this.fitToNodes(0);
-      }
     }
   }
 
