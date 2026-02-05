@@ -289,6 +289,8 @@ export class Renderer {
 
   // Icon atlas state
   private iconAtlasTexture: WebGLTexture | null = null;
+  private iconAtlasAllocatedW = 0;
+  private iconAtlasAllocatedH = 0;
   private iconAtlasColumns = 0;
   private iconAtlasRows = 0;
   private iconAtlasLocation: WebGLUniformLocation | null = null;
@@ -420,7 +422,8 @@ export class Renderer {
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
-      alpha: false,
+      alpha: true,
+      premultipliedAlpha: true,
       depth: false,
       stencil: false,
       desynchronized: true,
@@ -1668,16 +1671,38 @@ export class Renderer {
   /** Upload an icon atlas texture. columns/rows describe the grid layout. */
   setIconAtlas(source: TexImageSource, columns: number, rows: number): void {
     const gl = this.gl;
+    const w =
+      source instanceof HTMLCanvasElement || source instanceof HTMLImageElement
+        ? source.width
+        : (source as ImageBitmap).width;
+    const h =
+      source instanceof HTMLCanvasElement || source instanceof HTMLImageElement
+        ? source.height
+        : (source as ImageBitmap).height;
+
     if (!this.iconAtlasTexture) {
       this.iconAtlasTexture = gl.createTexture();
     }
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // Use immutable texStorage2D if size changed (allows driver to optimize layout)
+    if (w !== this.iconAtlasAllocatedW || h !== this.iconAtlasAllocatedH) {
+      // Must recreate texture for new size since texStorage is immutable
+      if (this.iconAtlasAllocatedW > 0) {
+        gl.deleteTexture(this.iconAtlasTexture);
+        this.iconAtlasTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
+      }
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+      this.iconAtlasAllocatedW = w;
+      this.iconAtlasAllocatedH = h;
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
     this.iconAtlasColumns = columns;
     this.iconAtlasRows = rows;
 
