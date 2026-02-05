@@ -237,6 +237,92 @@ export function simulateWheel(
   );
 }
 
+/**
+ * Simulate a touch tap: touchstart then touchend at the same position.
+ */
+export function simulateTouchTap(canvas: HTMLCanvasElement, cssX: number, cssY: number): void {
+  const touch = new Touch({
+    identifier: 0,
+    target: canvas,
+    clientX: cssX,
+    clientY: cssY,
+  });
+  canvas.dispatchEvent(
+    new TouchEvent("touchstart", {
+      touches: [touch],
+      changedTouches: [touch],
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  canvas.dispatchEvent(
+    new TouchEvent("touchend", {
+      touches: [],
+      changedTouches: [touch],
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+/**
+ * Simulate a touch double-tap: two taps in quick succession.
+ */
+export function simulateTouchDoubleTap(
+  canvas: HTMLCanvasElement,
+  cssX: number,
+  cssY: number,
+): void {
+  simulateTouchTap(canvas, cssX, cssY);
+  simulateTouchTap(canvas, cssX, cssY);
+}
+
+/**
+ * Simulate a touch drag from (x1,y1) to (x2,y2). Must exceed CLICK_THRESHOLD
+ * to avoid triggering tap detection.
+ */
+export function simulateTouchDrag(
+  canvas: HTMLCanvasElement,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  steps = 5,
+): void {
+  const startTouch = new Touch({ identifier: 0, target: canvas, clientX: x1, clientY: y1 });
+  canvas.dispatchEvent(
+    new TouchEvent("touchstart", {
+      touches: [startTouch],
+      changedTouches: [startTouch],
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const mx = x1 + (x2 - x1) * t;
+    const my = y1 + (y2 - y1) * t;
+    const moveTouch = new Touch({ identifier: 0, target: canvas, clientX: mx, clientY: my });
+    canvas.dispatchEvent(
+      new TouchEvent("touchmove", {
+        touches: [moveTouch],
+        changedTouches: [moveTouch],
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }
+  const endTouch = new Touch({ identifier: 0, target: canvas, clientX: x2, clientY: y2 });
+  canvas.dispatchEvent(
+    new TouchEvent("touchend", {
+      touches: [],
+      changedTouches: [endTouch],
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
 // ── Wait Utilities ────────────────────────────────────────
 
 export function nextFrame(): Promise<void> {
