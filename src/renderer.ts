@@ -2243,7 +2243,10 @@ export class Renderer {
     const gl = this.gl;
 
     this.resize();
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // Cache canvas dimensions to avoid repeated property access
+    const canvasW = this.canvas.width;
+    const canvasH = this.canvas.height;
+    gl.viewport(0, 0, canvasW, canvasH);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     this.updateProjection();
@@ -2258,7 +2261,7 @@ export class Renderer {
 
     // Convert CSS pixel radius limits to world-space
     // Use canvas.width/dpr to avoid clientWidth layout query
-    const clientW = this.canvas.width / this.cachedDpr || 1;
+    const clientW = canvasW / this.cachedDpr || 1;
     const worldPerCssPx = (this.halfW * 2) / clientW;
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
@@ -2298,7 +2301,7 @@ export class Renderer {
         this.sentEdgeMinRadius = minR;
         this.sentEdgeMaxRadius = maxR;
       }
-      const pxPerWorld = projScaleX * this.canvas.width * 0.5;
+      const pxPerWorld = projScaleX * canvasW * 0.5;
       if (pxPerWorld !== this.sentEdgePxPerWorld) {
         gl.uniform1f(this.edgePxPerWorldLocation, pxPerWorld);
         this.sentEdgePxPerWorld = pxPerWorld;
