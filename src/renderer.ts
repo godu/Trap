@@ -1181,16 +1181,16 @@ export class Renderer {
     const canvas = this.canvas;
     canvas.style.cursor = "default";
 
-    // Wheel: scroll → pan, pinch → zoom
+    // Wheel: mouse wheel → zoom, trackpad scroll → pan
     canvas.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        if (e.ctrlKey) {
-          // Pinch gesture on trackpad
+        if (e.ctrlKey || e.deltaMode === 1) {
+          // Trackpad pinch (ctrlKey) or mouse wheel (deltaMode=1 = line mode)
           this.zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR);
         } else {
-          // Two-finger scroll → pan
+          // Trackpad scroll (deltaMode=0 = pixel mode)
           this.pan(-e.deltaX, -e.deltaY);
         }
       },
@@ -1292,7 +1292,7 @@ export class Renderer {
           const dy = touches[0].clientY - this.touch0Y;
           this.pan(dx, dy);
         } else if (touches.length >= 2 && prevCount >= 2) {
-          // Pinch zoom: compare finger distances
+          // Pinch zoom only (no pan on 2-finger)
           const oldDx = this.touch0X - this.touch1X;
           const oldDy = this.touch0Y - this.touch1Y;
           const oldDist = Math.sqrt(oldDx * oldDx + oldDy * oldDy);
@@ -1304,16 +1304,11 @@ export class Renderer {
           const newMidX = (touches[0].clientX + touches[1].clientX) * 0.5;
           const newMidY = (touches[0].clientY + touches[1].clientY) * 0.5;
 
-          // Apply pinch zoom directly (no animation for immediate response)
           if (oldDist > 1 && newDist > 1) {
             const scale = oldDist / newDist; // >1 = zoom out, <1 = zoom in
             this.pinchZoom(newMidX, newMidY, scale);
           }
-
-          // Two-finger pan (midpoint shift)
-          const oldMidX = (this.touch0X + this.touch1X) * 0.5;
-          const oldMidY = (this.touch0Y + this.touch1Y) * 0.5;
-          this.pan(newMidX - oldMidX, newMidY - oldMidY);
+          this.requestRender();
         }
 
         this.storeTouches(touches);
