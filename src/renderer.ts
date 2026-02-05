@@ -1829,10 +1829,20 @@ export class Renderer {
       cancelAnimationFrame(this.dataAnimId);
       this.dataAnimId = null;
     }
+
+    // Delete GPU resources to prevent memory leaks (MDN best practice)
+    const gl = this.gl;
+    gl.deleteBuffer(this.nodeInstanceBuffer);
+    gl.deleteBuffer(this.edgeInstanceBuffer);
+    gl.deleteVertexArray(this.vao);
+    gl.deleteVertexArray(this.edgeVao);
+    gl.deleteProgram(this.program);
+    gl.deleteProgram(this.edgeProgram);
     if (this.iconAtlasTexture) {
-      this.gl.deleteTexture(this.iconAtlasTexture);
+      gl.deleteTexture(this.iconAtlasTexture);
       this.iconAtlasTexture = null;
     }
+
     this.resizeObserver.disconnect();
   }
 }
