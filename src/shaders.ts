@@ -46,6 +46,8 @@ flat in float v_worldRadius;
 uniform sampler2D u_iconAtlas;
 uniform float u_atlasColumns;
 uniform float u_atlasRows;
+uniform float u_invAtlasCols;
+uniform float u_invAtlasRows;
 
 out vec4 outColor;
 
@@ -60,13 +62,12 @@ void main() {
   // Icon sampling: branchless via step mask
   // Hoist max() to avoid redundant calls (compiler may not optimize across divisions)
   float cols = max(u_atlasColumns, 1.0);
-  float rows = max(u_atlasRows, 1.0);
   float hasIcon = step(0.5, v_iconIndex) * step(0.5, u_atlasColumns);
   vec2 iconUV = v_uv * 0.5 + 0.5;
   float idx = v_iconIndex - 1.0;
   float col = mod(idx, cols);
-  float row = floor(idx / cols);
-  vec2 atlasUV = vec2((col + iconUV.x) / cols, (row + 1.0 - iconUV.y) / rows);
+  float row = floor(idx * u_invAtlasCols);
+  vec2 atlasUV = vec2((col + iconUV.x) * u_invAtlasCols, (row + 1.0 - iconUV.y) * u_invAtlasRows);
   float iconAlpha = texture(u_iconAtlas, atlasUV).a * hasIcon;
   rgb += iconAlpha * a;
 
@@ -153,12 +154,13 @@ void main() {
   float speed0 = 2.0 * armLen;
 
   // Parametric insets using per-node radii
-  float tStart = srcRadius / speed0;
-  float tEnd = 1.0 - tgtRadius / speed0;
+  float invSpeed0 = 1.0 / speed0;
+  float tStart = srcRadius * invSpeed0;
+  float tEnd = 1.0 - tgtRadius * invSpeed0;
   float tRange = tEnd - tStart;
 
   float headLen = min(u_headLength, usableLen * 0.4);
-  float headT = headLen / speed0;
+  float headT = headLen * invSpeed0;
 
   float tParam = a_template.x;
   float flag = a_template.z;
