@@ -1236,11 +1236,14 @@ export class Renderer {
 
     for (let i = 0; i < target.length; i++) {
       const edge = target[i];
+      // Only animate common edges; new edges appear at animation end
+      const old = this.oldEdgeMap.get(edge.id);
+      if (!old) continue;
+
       const src = interpNodeMap.get(edge.source);
       const tgt = interpNodeMap.get(edge.target);
       if (!src || !tgt) continue;
 
-      const old = this.oldEdgeMap.get(edge.id);
       const slot = count * 8;
       f32[slot] = src.x;
       f32[slot + 1] = src.y;
@@ -1249,18 +1252,12 @@ export class Renderer {
       f32[slot + 4] = src.radius;
       f32[slot + 5] = tgt.radius;
 
-      if (old) {
-        const a = old.a * omt + edge.a * t;
-        const r = old.r * omt + edge.r * t;
-        const g = old.g * omt + edge.g * t;
-        const b = old.b * omt + edge.b * t;
-        f32[slot + 7] = (old.width ?? 1.0) * omt + (edge.width ?? 1.0) * t;
-        u32[slot + 6] = packPremultiplied(r, g, b, a);
-      } else {
-        // New edge — fade in
-        u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a * t);
-        f32[slot + 7] = edge.width ?? 1.0;
-      }
+      const a = old.a * omt + edge.a * t;
+      const r = old.r * omt + edge.r * t;
+      const g = old.g * omt + edge.g * t;
+      const b = old.b * omt + edge.b * t;
+      f32[slot + 7] = (old.width ?? 1.0) * omt + (edge.width ?? 1.0) * t;
+      u32[slot + 6] = packPremultiplied(r, g, b, a);
 
       // Compute AABB for this edge (positions are interpolated)
       // Use Manhattan distance * CURVATURE as conservative approximation (avoids sqrt)
