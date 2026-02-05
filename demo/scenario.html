@@ -80,6 +80,27 @@
         border-radius: 4px;
         pointer-events: none;
       }
+      #fps-panel {
+        position: fixed;
+        top: 56px;
+        right: 8px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.6);
+        border-radius: 4px;
+        pointer-events: none;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      #fps-text {
+        color: rgba(255, 255, 255, 0.7);
+        font: 12px/1 monospace;
+      }
+      #fps-graph {
+        display: block;
+        border-radius: 2px;
+        background: rgba(0, 0, 0, 0.3);
+      }
     </style>
   </head>
   <body>
@@ -93,6 +114,10 @@
     </header>
     <canvas id="canvas"></canvas>
     <div id="event-info"></div>
+    <div id="fps-panel">
+      <span id="fps-text">-- FPS</span>
+      <canvas id="fps-graph" width="120" height="40"></canvas>
+    </div>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

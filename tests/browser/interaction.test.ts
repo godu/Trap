@@ -54,7 +54,7 @@ describe("Interactions", () => {
   });
 
   describe("zoom", () => {
-    it("wheel scroll zooms in (node appears larger)", async () => {
+    it("pinch zooms in (node appears larger)", async () => {
       canvas = createTestCanvas();
       const { nodes } = singleNodeGraph();
       renderer = createTestRenderer(canvas, nodes);
@@ -66,9 +66,9 @@ describe("Interactions", () => {
       const offsetY = 170; // 30px above center
       const before = readPixelAt(canvas, offsetX, offsetY);
 
-      // Zoom in (negative deltaY)
+      // Zoom in via pinch gesture (ctrlKey + negative deltaY)
       for (let i = 0; i < 5; i++) {
-        simulateWheel(canvas, 200, 200, -100);
+        simulateWheel(canvas, 200, 200, -100, true);
       }
       await nextFrame();
       renderer.render();
@@ -89,7 +89,7 @@ describe("Interactions", () => {
       }
     });
 
-    it("wheel scroll zooms out (node appears smaller)", async () => {
+    it("pinch zooms out (node appears smaller)", async () => {
       canvas = createTestCanvas();
       const { nodes } = singleNodeGraph();
       renderer = createTestRenderer(canvas, nodes);
@@ -103,9 +103,9 @@ describe("Interactions", () => {
         if (!isBackground(r, g, b)) beforeCount++;
       }
 
-      // Zoom out (positive deltaY)
+      // Zoom out via pinch gesture (ctrlKey + positive deltaY)
       for (let i = 0; i < 5; i++) {
-        simulateWheel(canvas, 200, 200, 100);
+        simulateWheel(canvas, 200, 200, 100, true);
       }
       await nextFrame();
       renderer.render();

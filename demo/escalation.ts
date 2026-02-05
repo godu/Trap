@@ -2,6 +2,7 @@ import { Renderer } from "../src/index";
 import { toRenderNodes, toEdges } from "./graph/convert";
 import type { GraphStep } from "./graph/types";
 import { ICON_SVGS } from "./icons/index";
+import { initFpsCounter, countRenderFrame } from "./fps";
 import {
   FIRST_STEP_NODES,
   FIRST_STEP_EDGES,
@@ -41,6 +42,7 @@ const renderer = new Renderer({
   onEdgeHoverLeave: (e) => showEvent(e.type, "edge", e.edgeId),
   onBackgroundClick: (e) => showEvent(e.type, "background"),
   onBackgroundDblClick: (e) => showEvent(e.type, "background"),
+  onRender: countRenderFrame,
 });
 renderer.setIcons(ICON_SVGS);
 renderer.render();
@@ -70,3 +72,6 @@ document.getElementById("step-toggle")?.addEventListener("click", (e) => {
 
   showStep(stepIndex);
 });
+
+// Initialize FPS counter
+initFpsCounter();
