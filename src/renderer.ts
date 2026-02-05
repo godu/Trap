@@ -359,6 +359,7 @@ export class Renderer {
   // Bound animation callbacks (avoid closure allocation per frame)
   private boundDataAnimFrame!: (now: number) => void;
   private boundCameraAnimFrame!: (now: number) => void;
+  private boundRenderCallback!: () => void;
 
   // Projection dirty flag (avoid recomputing when camera unchanged)
   private projectionDirty = true;
@@ -506,6 +507,7 @@ export class Renderer {
     // Bind animation callbacks once (avoid closure allocation per frame)
     this.boundDataAnimFrame = this.dataAnimFrame.bind(this);
     this.boundCameraAnimFrame = this.cameraAnimFrame.bind(this);
+    this.boundRenderCallback = this.renderCallback.bind(this);
 
     this.resize();
     this.initCamera();
@@ -1541,11 +1543,13 @@ export class Renderer {
   private requestRender(): void {
     if (!this.renderPending && this.dataAnimId === null) {
       this.renderPending = true;
-      requestAnimationFrame(() => {
-        this.renderPending = false;
-        this.render();
-      });
+      requestAnimationFrame(this.boundRenderCallback);
     }
+  }
+
+  private renderCallback(): void {
+    this.renderPending = false;
+    this.render();
   }
 
   private zoomAt(screenX: number, screenY: number, factor: number): void {
