@@ -49,6 +49,9 @@ export interface BackgroundEvent {
   originalEvent: MouseEvent | TouchEvent;
 }
 
+/** Controls how the camera adjusts when the canvas container is resized. */
+export type ResizeMode = "fixed-height" | "pixel-density" | "preserve-area" | "fit";
+
 export interface RendererOptions {
   canvas: HTMLCanvasElement;
   nodes: Node[];
@@ -73,4 +76,6 @@ export interface RendererOptions {
   minScreenRadius?: number;
   /** Maximum node screen radius in CSS pixels (default: 40). */
   maxScreenRadius?: number;
+  /** Resize strategy (default: "fixed-height"). */
+  resizeMode?: ResizeMode;
 }
