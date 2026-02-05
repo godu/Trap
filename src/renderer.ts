@@ -844,6 +844,8 @@ export class Renderer {
     const grid = this.edgeGrid!;
 
     // Assign each edge to cells it intersects
+    const maxCellIdxX = gridCellsX - 1;
+    const maxCellIdxY = gridCellsY - 1;
     for (let i = 0; i < edgeCount; i++) {
       const aabbIdx = i * 4;
       const eMinX = aabb[aabbIdx];
@@ -851,11 +853,15 @@ export class Renderer {
       const eMaxX = aabb[aabbIdx + 2];
       const eMaxY = aabb[aabbIdx + 3];
 
-      // Compute cell range this edge spans
-      const cx0 = Math.max(0, Math.min(gridCellsX - 1, Math.floor((eMinX - gridMinX) / cellW)));
-      const cy0 = Math.max(0, Math.min(gridCellsY - 1, Math.floor((eMinY - gridMinY) / cellH)));
-      const cx1 = Math.max(0, Math.min(gridCellsX - 1, Math.floor((eMaxX - gridMinX) / cellW)));
-      const cy1 = Math.max(0, Math.min(gridCellsY - 1, Math.floor((eMaxY - gridMinY) / cellH)));
+      // Compute cell range this edge spans (inline clamp avoids 12 function calls)
+      let cx0 = Math.floor((eMinX - gridMinX) / cellW);
+      let cy0 = Math.floor((eMinY - gridMinY) / cellH);
+      let cx1 = Math.floor((eMaxX - gridMinX) / cellW);
+      let cy1 = Math.floor((eMaxY - gridMinY) / cellH);
+      if (cx0 < 0) cx0 = 0; else if (cx0 > maxCellIdxX) cx0 = maxCellIdxX;
+      if (cy0 < 0) cy0 = 0; else if (cy0 > maxCellIdxY) cy0 = maxCellIdxY;
+      if (cx1 < 0) cx1 = 0; else if (cx1 > maxCellIdxX) cx1 = maxCellIdxX;
+      if (cy1 < 0) cy1 = 0; else if (cy1 > maxCellIdxY) cy1 = maxCellIdxY;
 
       for (let cy = cy0; cy <= cy1; cy++) {
         for (let cx = cx0; cx <= cx1; cx++) {
