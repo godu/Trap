@@ -3,39 +3,56 @@ import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } fr
 import { computeBounds, computeFitView } from "./camera";
 import { buildIconAtlas } from "./atlas";
 
-function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
-  const shader = gl.createShader(type);
-  if (!shader) throw new Error("Failed to create shader");
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const info = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(`Shader compile error: ${info}`);
-  }
-  return shader;
-}
-
-function createProgram(
+/**
+ * Batch-compile shaders and link programs to minimize GPU sync points.
+ * Compile all shaders first, link all programs, then check status once.
+ * Only queries compile status on link failure (for diagnostics).
+ */
+function createPrograms(
   gl: WebGL2RenderingContext,
-  vsSource: string,
-  fsSource: string,
-): WebGLProgram {
-  const vs = compileShader(gl, gl.VERTEX_SHADER, vsSource);
-  const fs = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
-  const program = gl.createProgram();
-  if (!program) throw new Error("Failed to create program");
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const info = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
-    throw new Error(`Program link error: ${info}`);
+  sources: [string, string][],
+): WebGLProgram[] {
+  const shaders: WebGLShader[] = [];
+  const programs: WebGLProgram[] = [];
+
+  // Phase 1: compile all shaders (no status check — avoids GPU sync)
+  for (const [vs, fs] of sources) {
+    const vsh = gl.createShader(gl.VERTEX_SHADER)!;
+    gl.shaderSource(vsh, vs);
+    gl.compileShader(vsh);
+    const fsh = gl.createShader(gl.FRAGMENT_SHADER)!;
+    gl.shaderSource(fsh, fs);
+    gl.compileShader(fsh);
+    shaders.push(vsh, fsh);
   }
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  return program;
+
+  // Phase 2: link all programs
+  for (let i = 0; i < sources.length; i++) {
+    const program = gl.createProgram()!;
+    gl.attachShader(program, shaders[i * 2]);
+    gl.attachShader(program, shaders[i * 2 + 1]);
+    gl.linkProgram(program);
+    programs.push(program);
+  }
+
+  // Phase 3: check link status (single sync point)
+  for (let i = 0; i < programs.length; i++) {
+    if (!gl.getProgramParameter(programs[i], gl.LINK_STATUS)) {
+      // Check shader compile status for diagnostics
+      const vs = shaders[i * 2];
+      const fs = shaders[i * 2 + 1];
+      if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS))
+        throw new Error(`Vertex shader compile error: ${gl.getShaderInfoLog(vs)}`);
+      if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS))
+        throw new Error(`Fragment shader compile error: ${gl.getShaderInfoLog(fs)}`);
+      throw new Error(`Program link error: ${gl.getProgramInfoLog(programs[i])}`);
+    }
+  }
+
+  // Phase 4: delete shaders (already linked)
+  for (const s of shaders) gl.deleteShader(s);
+
+  return programs;
 }
 
 function lerp(a: number, b: number, t: number): number {
@@ -210,6 +227,7 @@ export class Renderer {
   private nodeViewportLocation: WebGLUniformLocation;
   private nodes: Node[];
   private nodeInstanceBuffer!: WebGLBuffer;
+  private nodeQuadBuffer!: WebGLBuffer;
 
   // Node/edge maps for object API
   private nodeMap = new Map<string, Node>();
@@ -229,6 +247,8 @@ export class Renderer {
   private edgeMaxRadiusLocation: WebGLUniformLocation;
   private edgePxPerWorldLocation: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
+  private edgeTemplateBuffer!: WebGLBuffer;
+  private edgeIndexBuffer!: WebGLBuffer;
 
   // Camera state (world-space view)
   private centerX = 0;
@@ -302,6 +322,8 @@ export class Renderer {
   private iconAtlasLocation: WebGLUniformLocation | null = null;
   private iconAtlasColsLocation: WebGLUniformLocation | null = null;
   private iconAtlasRowsLocation: WebGLUniformLocation | null = null;
+  private iconInvAtlasColsLocation: WebGLUniformLocation | null = null;
+  private iconInvAtlasRowsLocation: WebGLUniformLocation | null = null;
 
   // Active GL state tracking (avoid redundant useProgram/bindVertexArray/bindTexture)
   private activeProgram: WebGLProgram | null = null;
@@ -360,6 +382,11 @@ export class Renderer {
   // Hover state
   private hoveredNodeId: string | null = null;
   private hoveredEdgeId: string | null = null;
+
+  // Pre-allocated event objects (reused to avoid GC pressure on mousemove)
+  private readonly nodeEventPool: NodeEvent = { type: "", nodeId: "", node: null!, worldX: 0, worldY: 0, originalEvent: null! };
+  private readonly edgeEventPool: EdgeEvent = { type: "", edgeId: "", edge: null!, worldX: 0, worldY: 0, originalEvent: null! };
+  private readonly bgEventPool: BackgroundEvent = { type: "", worldX: 0, worldY: 0, originalEvent: null! };
 
   // Cached sorted arrays for animation (sort once, reuse every frame)
   private sortedTargetNodes: Node[] | null = null;
@@ -487,7 +514,13 @@ export class Renderer {
     if (!gl) throw new Error("WebGL2 not supported");
     this.gl = gl;
 
-    this.program = createProgram(gl, vertexSource, fragmentSource);
+    // Batch-compile both programs (single GPU sync point)
+    const [nodeProgram, edgeProgram] = createPrograms(gl, [
+      [vertexSource, fragmentSource],
+      [edgeVertexSource, edgeFragmentSource],
+    ]);
+    this.program = nodeProgram;
+    this.edgeProgram = edgeProgram;
 
     const sLoc = gl.getUniformLocation(this.program, "u_scale");
     const oLoc = gl.getUniformLocation(this.program, "u_offset");
@@ -501,11 +534,10 @@ export class Renderer {
     this.iconAtlasLocation = gl.getUniformLocation(this.program, "u_iconAtlas");
     this.iconAtlasColsLocation = gl.getUniformLocation(this.program, "u_atlasColumns");
     this.iconAtlasRowsLocation = gl.getUniformLocation(this.program, "u_atlasRows");
+    this.iconInvAtlasColsLocation = gl.getUniformLocation(this.program, "u_invAtlasCols");
+    this.iconInvAtlasRowsLocation = gl.getUniformLocation(this.program, "u_invAtlasRows");
 
     this.vao = this.setupGeometry(gl, options.nodes);
-
-    // Edge program
-    this.edgeProgram = createProgram(gl, edgeVertexSource, edgeFragmentSource);
 
     const esLoc = gl.getUniformLocation(this.edgeProgram, "u_scale");
     const eoLoc = gl.getUniformLocation(this.edgeProgram, "u_offset");
@@ -606,8 +638,8 @@ export class Renderer {
       -1,  1,
     ]);
 
-    const quadBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    this.nodeQuadBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeQuadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, quadVertices, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
@@ -731,8 +763,8 @@ export class Renderer {
     template[vi++] = HEAD_HW;
     template[vi++] = 1;
 
-    const templateBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, templateBuf);
+    this.edgeTemplateBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeTemplateBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, template, gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
@@ -753,8 +785,8 @@ export class Renderer {
     indices[ii++] = headBase; // head bottom
     indices[ii++] = headBase + 1; // head tip
     indices[ii++] = headBase + 2; // head top
-    const indexBuf = gl.createBuffer();
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuf);
+    this.edgeIndexBuffer = gl.createBuffer()!;
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.edgeIndexBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
 
     // Single interleaved instance buffer
@@ -1563,6 +1595,38 @@ export class Renderer {
     );
   }
 
+  // Emit pooled events (mutate-then-call avoids allocating per event)
+  private emitNodeEvent(
+    cb: (e: NodeEvent) => void,
+    type: string, nodeId: string, node: Node,
+    worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+  ): void {
+    const ev = this.nodeEventPool;
+    ev.type = type; ev.nodeId = nodeId; ev.node = node;
+    ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    cb(ev);
+  }
+
+  private emitEdgeEvent(
+    cb: (e: EdgeEvent) => void,
+    type: string, edgeId: string, edge: Edge,
+    worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+  ): void {
+    const ev = this.edgeEventPool;
+    ev.type = type; ev.edgeId = edgeId; ev.edge = edge;
+    ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    cb(ev);
+  }
+
+  private emitBgEvent(
+    cb: (e: BackgroundEvent) => void,
+    type: string, worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+  ): void {
+    const ev = this.bgEventPool;
+    ev.type = type; ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    cb(ev);
+  }
+
   private handleClick(
     clientX: number,
     clientY: number,
@@ -1574,37 +1638,18 @@ export class Renderer {
 
     const node = this.hitTestNode(worldX, worldY);
     if (node && this.onNodeClick) {
-      this.onNodeClick({
-        type: "click",
-        nodeId: node.id,
-        node,
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitNodeEvent(this.onNodeClick, "click", node.id, node, worldX, worldY, originalEvent);
       return;
     }
 
     const edge = this.hitTestEdge(worldX, worldY);
     if (edge && this.onEdgeClick) {
-      this.onEdgeClick({
-        type: "click",
-        edgeId: edge.id,
-        edge,
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitEdgeEvent(this.onEdgeClick, "click", edge.id, edge, worldX, worldY, originalEvent);
       return;
     }
 
     if (this.onBackgroundClick) {
-      this.onBackgroundClick({
-        type: "click",
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitBgEvent(this.onBackgroundClick, "click", worldX, worldY, originalEvent);
     }
   }
 
@@ -1619,37 +1664,18 @@ export class Renderer {
 
     const node = this.hitTestNode(worldX, worldY);
     if (node && this.onNodeDblClick) {
-      this.onNodeDblClick({
-        type: "dblclick",
-        nodeId: node.id,
-        node,
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitNodeEvent(this.onNodeDblClick, "dblclick", node.id, node, worldX, worldY, originalEvent);
       return;
     }
 
     const edge = this.hitTestEdge(worldX, worldY);
     if (edge && this.onEdgeDblClick) {
-      this.onEdgeDblClick({
-        type: "dblclick",
-        edgeId: edge.id,
-        edge,
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitEdgeEvent(this.onEdgeDblClick, "dblclick", edge.id, edge, worldX, worldY, originalEvent);
       return;
     }
 
     if (this.onBackgroundDblClick) {
-      this.onBackgroundDblClick({
-        type: "dblclick",
-        worldX,
-        worldY,
-        originalEvent,
-      });
+      this.emitBgEvent(this.onBackgroundDblClick, "dblclick", worldX, worldY, originalEvent);
     }
   }
 
@@ -1674,25 +1700,11 @@ export class Renderer {
       if (this.hoveredNodeId && this.onNodeHoverLeave) {
         const oldNode = this.nodeMap.get(this.hoveredNodeId);
         if (oldNode) {
-          this.onNodeHoverLeave({
-            type: "hoverleave",
-            nodeId: this.hoveredNodeId,
-            node: oldNode,
-            worldX,
-            worldY,
-            originalEvent: e,
-          });
+          this.emitNodeEvent(this.onNodeHoverLeave, "hoverleave", this.hoveredNodeId, oldNode, worldX, worldY, e);
         }
       }
       if (nodeId && node && this.onNodeHoverEnter) {
-        this.onNodeHoverEnter({
-          type: "hoverenter",
-          nodeId,
-          node,
-          worldX,
-          worldY,
-          originalEvent: e,
-        });
+        this.emitNodeEvent(this.onNodeHoverEnter, "hoverenter", nodeId, node, worldX, worldY, e);
       }
       this.hoveredNodeId = nodeId;
     }
@@ -1706,25 +1718,11 @@ export class Renderer {
         if (this.hoveredEdgeId && this.onEdgeHoverLeave) {
           const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
           if (oldEdge) {
-            this.onEdgeHoverLeave({
-              type: "hoverleave",
-              edgeId: this.hoveredEdgeId,
-              edge: oldEdge,
-              worldX,
-              worldY,
-              originalEvent: e,
-            });
+            this.emitEdgeEvent(this.onEdgeHoverLeave, "hoverleave", this.hoveredEdgeId, oldEdge, worldX, worldY, e);
           }
         }
         if (edgeId && edge && this.onEdgeHoverEnter) {
-          this.onEdgeHoverEnter({
-            type: "hoverenter",
-            edgeId,
-            edge,
-            worldX,
-            worldY,
-            originalEvent: e,
-          });
+          this.emitEdgeEvent(this.onEdgeHoverEnter, "hoverenter", edgeId, edge, worldX, worldY, e);
         }
         this.hoveredEdgeId = edgeId;
       }
@@ -1736,14 +1734,7 @@ export class Renderer {
         if (this.onEdgeHoverLeave) {
           const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
           if (oldEdge) {
-            this.onEdgeHoverLeave({
-              type: "hoverleave",
-              edgeId: this.hoveredEdgeId,
-              edge: oldEdge,
-              worldX,
-              worldY,
-              originalEvent: e,
-            });
+            this.emitEdgeEvent(this.onEdgeHoverLeave, "hoverleave", this.hoveredEdgeId, oldEdge, worldX, worldY, e);
           }
         }
         this.hoveredEdgeId = null;
@@ -2062,6 +2053,8 @@ export class Renderer {
     gl.uniform1i(this.iconAtlasLocation!, 0);
     gl.uniform1f(this.iconAtlasColsLocation!, columns);
     gl.uniform1f(this.iconAtlasRowsLocation!, rows);
+    gl.uniform1f(this.iconInvAtlasColsLocation!, 1.0 / Math.max(columns, 1));
+    gl.uniform1f(this.iconInvAtlasRowsLocation!, 1.0 / Math.max(rows, 1));
     this.requestRender();
   }
 
@@ -2431,7 +2424,10 @@ export class Renderer {
     // Delete GPU resources to prevent memory leaks (MDN best practice)
     const gl = this.gl;
     gl.deleteBuffer(this.nodeInstanceBuffer);
+    gl.deleteBuffer(this.nodeQuadBuffer);
     gl.deleteBuffer(this.edgeInstanceBuffer);
+    gl.deleteBuffer(this.edgeTemplateBuffer);
+    gl.deleteBuffer(this.edgeIndexBuffer);
     gl.deleteVertexArray(this.vao);
     gl.deleteVertexArray(this.edgeVao);
     gl.deleteProgram(this.program);
