@@ -424,8 +424,9 @@ export class Renderer {
   private edgeBufferUploaded = false; // track if full buffer already uploaded
 
   // Grid spatial index for O(visible cells) culling instead of O(n)
-  private readonly gridCellsX = 32;
-  private readonly gridCellsY = 32;
+  // Adaptive grid sizing: ~16 edges per cell on average, min 8x8, max 64x64
+  private gridCellsX = 32;
+  private gridCellsY = 32;
   private edgeGrid: Uint32Array[] | null = null; // [cellIndex] => edge indices
   private edgeGridCounts: Uint32Array | null = null; // count per cell
   private visitedEdges: Uint8Array | null = null; // bitset for deduplication
@@ -807,9 +808,16 @@ export class Renderer {
 
   /** Build spatial grid for fast edge culling. Call after AABBs are computed. */
   private buildEdgeGrid(edgeCount: number): void {
-    const cellCount = this.gridCellsX * this.gridCellsY;
+    // Adaptive grid sizing: aim for ~16 edges per cell, clamp to [8, 64]
+    const targetEdgesPerCell = 16;
+    const optimalCells = Math.sqrt(edgeCount / targetEdgesPerCell);
+    const gridSize = Math.max(8, Math.min(64, Math.round(optimalCells)));
+    this.gridCellsX = gridSize;
+    this.gridCellsY = gridSize;
 
-    // Initialize grid arrays if needed
+    const cellCount = gridSize * gridSize;
+
+    // Initialize grid arrays if needed (reallocate if size changed)
     if (!this.edgeGrid || this.edgeGrid.length !== cellCount) {
       this.edgeGrid = Array.from({ length: cellCount }, () => new Uint32Array(64));
       this.edgeGridCounts = new Uint32Array(cellCount);
