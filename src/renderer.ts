@@ -412,6 +412,7 @@ export class Renderer {
   private edgeAABBCapacity = 0;
   private visibleEdgeBuf: Uint8Array | null = null;
   private visibleEdgeCapacity = 0;
+  private visibleEdgeIndices: Uint32Array | null = null; // indices of visible edges for sorting
   private visibleEdgeCount = 0;
   private totalEdgeCount = 0; // total edges before culling
   // Bounds of all edges (for early-out when viewport contains all)
@@ -420,6 +421,24 @@ export class Renderer {
   private allEdgesMaxX = 0;
   private allEdgesMaxY = 0;
   private edgeBufferUploaded = false; // track if full buffer already uploaded
+
+  // Grid spatial index for O(visible cells) culling instead of O(n)
+  private readonly gridCellsX = 32;
+  private readonly gridCellsY = 32;
+  private edgeGrid: Uint32Array[] | null = null; // [cellIndex] => edge indices
+  private edgeGridCounts: Uint32Array | null = null; // count per cell
+  private visitedEdges: Uint8Array | null = null; // bitset for deduplication
+  private gridMinX = 0;
+  private gridMinY = 0;
+  private gridCellW = 0;
+  private gridCellH = 0;
+
+  // Motion-based cached rendering: cache culled edges during motion, reuse on subsequent frames
+  private inMotion = false;
+  private lastMotionTime = 0;
+  private motionCacheValid = false; // true if we have a cached motion render
+  private motionEdgeCount = 0; // cached edge count for motion frames
+  private motionEndTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: RendererOptions) {
     this.canvas = options.canvas;
@@ -784,6 +803,77 @@ export class Renderer {
     this.visibleEdgeCapacity = newCap;
   }
 
+  /** Build spatial grid for fast edge culling. Call after AABBs are computed. */
+  private buildEdgeGrid(edgeCount: number): void {
+    const cellCount = this.gridCellsX * this.gridCellsY;
+
+    // Initialize grid arrays if needed
+    if (!this.edgeGrid || this.edgeGrid.length !== cellCount) {
+      this.edgeGrid = Array.from({ length: cellCount }, () => new Uint32Array(64));
+      this.edgeGridCounts = new Uint32Array(cellCount);
+    }
+
+    // Ensure visited bitset has capacity
+    const bitsetSize = Math.ceil(edgeCount / 8);
+    if (!this.visitedEdges || this.visitedEdges.length < bitsetSize) {
+      this.visitedEdges = new Uint8Array(Math.max(bitsetSize, 256));
+    }
+
+    // Compute grid cell dimensions from all-edges bounds
+    const boundsW = this.allEdgesMaxX - this.allEdgesMinX;
+    const boundsH = this.allEdgesMaxY - this.allEdgesMinY;
+    // Handle degenerate case where all edges are at same position
+    this.gridMinX = this.allEdgesMinX;
+    this.gridMinY = this.allEdgesMinY;
+    this.gridCellW = boundsW > 0 ? boundsW / this.gridCellsX : 1;
+    this.gridCellH = boundsH > 0 ? boundsH / this.gridCellsY : 1;
+
+    // Reset cell counts
+    const counts = this.edgeGridCounts!;
+    counts.fill(0);
+
+    const aabb = this.edgeAABBs!;
+    const gridCellsX = this.gridCellsX;
+    const gridCellsY = this.gridCellsY;
+    const gridMinX = this.gridMinX;
+    const gridMinY = this.gridMinY;
+    const cellW = this.gridCellW;
+    const cellH = this.gridCellH;
+    const grid = this.edgeGrid!;
+
+    // Assign each edge to cells it intersects
+    for (let i = 0; i < edgeCount; i++) {
+      const aabbIdx = i * 4;
+      const eMinX = aabb[aabbIdx];
+      const eMinY = aabb[aabbIdx + 1];
+      const eMaxX = aabb[aabbIdx + 2];
+      const eMaxY = aabb[aabbIdx + 3];
+
+      // Compute cell range this edge spans
+      const cx0 = Math.max(0, Math.min(gridCellsX - 1, Math.floor((eMinX - gridMinX) / cellW)));
+      const cy0 = Math.max(0, Math.min(gridCellsY - 1, Math.floor((eMinY - gridMinY) / cellH)));
+      const cx1 = Math.max(0, Math.min(gridCellsX - 1, Math.floor((eMaxX - gridMinX) / cellW)));
+      const cy1 = Math.max(0, Math.min(gridCellsY - 1, Math.floor((eMaxY - gridMinY) / cellH)));
+
+      for (let cy = cy0; cy <= cy1; cy++) {
+        for (let cx = cx0; cx <= cx1; cx++) {
+          const cellIdx = cy * gridCellsX + cx;
+          const count = counts[cellIdx];
+          let cell = grid[cellIdx];
+          // Grow cell array if needed
+          if (count >= cell.length) {
+            const newCell = new Uint32Array(cell.length * 2);
+            newCell.set(cell);
+            grid[cellIdx] = newCell;
+            cell = newCell;
+          }
+          cell[count] = i;
+          counts[cellIdx] = count + 1;
+        }
+      }
+    }
+  }
+
   /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
   private packEdgeBuffer(edges: Edge[]): {
     buffer: Uint8Array;
@@ -855,6 +945,7 @@ export class Renderer {
     this.allEdgesMaxX = allMaxX;
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false; // mark buffer as needing upload
+    this.buildEdgeGrid(count);
     return {
       buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE),
       count,
@@ -875,6 +966,12 @@ export class Renderer {
 
     // Pack buffer and compute AABBs; GPU upload deferred to render() for frustum culling
     this.packEdgeBuffer(edges);
+
+    // Reset motion cache when data changes - ensures first render does proper culling
+    this.motionCacheValid = false;
+    this.motionEdgeCount = 0;
+    this.edgeBufferUploaded = false;
+    this.inMotion = false;
   }
 
   /** Set edges using Edge object array. Renderer resolves node positions. */
@@ -1171,6 +1268,7 @@ export class Renderer {
     this.allEdgesMaxX = allMaxX;
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false;
+    this.buildEdgeGrid(count);
     // GPU upload deferred to render() which will cull and upload only visible edges
   }
 
@@ -1668,7 +1766,30 @@ export class Renderer {
 
   private renderCallback(): void {
     this.renderPending = false;
+    // Clear motion flag if enough idle time has passed (50ms)
+    if (this.inMotion && performance.now() - this.lastMotionTime > 50) {
+      this.inMotion = false;
+      this.motionCacheValid = false; // invalidate cache for full render
+    }
     this.render();
+
+    // Schedule a delayed render to do full culling after motion stops
+    if (this.inMotion && !this.motionEndTimeout) {
+      const checkMotionEnd = () => {
+        this.motionEndTimeout = null;
+        if (!this.inMotion) return; // already handled
+        if (performance.now() - this.lastMotionTime > 50) {
+          // Motion stopped - do full render
+          this.inMotion = false;
+          this.motionCacheValid = false;
+          this.render();
+        } else {
+          // Still moving - check again later
+          this.motionEndTimeout = setTimeout(checkMotionEnd, 60);
+        }
+      };
+      this.motionEndTimeout = setTimeout(checkMotionEnd, 60);
+    }
   }
 
   private zoomAt(screenX: number, screenY: number, factor: number): void {
@@ -1714,6 +1835,8 @@ export class Renderer {
     this.halfW = this.halfW * omt + this.zoomTargetHalfW * t;
     this.halfH = this.halfH * omt + this.zoomTargetHalfH * t;
     this.projectionDirty = true;
+    this.inMotion = true;
+    this.lastMotionTime = now;
 
     // Skip render if not enough time passed (adaptive frame skipping for slow renders)
     const elapsed = now - this.lastZoomRenderTime;
@@ -1727,7 +1850,7 @@ export class Renderer {
     if (ratio < 0.999 || ratio > 1.001) {
       requestAnimationFrame(this.boundZoomAnimFrame);
     } else {
-      // Snap to target and stop - always render final frame
+      // Snap to target and stop - always render final frame with full culling
       this.centerX = this.zoomTargetCenterX;
       this.centerY = this.zoomTargetCenterY;
       this.halfW = this.zoomTargetHalfW;
@@ -1735,6 +1858,8 @@ export class Renderer {
       this.zoomAnimating = false;
       this.projectionDirty = true;
       this.lastZoomRenderTime = 0; // reset for next zoom
+      this.inMotion = false; // motion ended, do full culling
+      this.motionCacheValid = false; // invalidate cache for full render
       this.render();
     }
   }
@@ -1763,6 +1888,8 @@ export class Renderer {
     this.centerX -= (screenDx / rect.width) * 2 * this.halfW;
     this.centerY += (screenDy / rect.height) * 2 * this.halfH;
     this.projectionDirty = true;
+    this.inMotion = true;
+    this.lastMotionTime = performance.now();
     this.requestRender();
   }
 
@@ -1806,13 +1933,18 @@ export class Renderer {
     this.halfW = lerp(this.animFrom.halfW, this.animTo.halfW, e);
     this.halfH = lerp(this.animFrom.halfH, this.animTo.halfH, e);
     this.projectionDirty = true;
-
-    this.render();
+    this.inMotion = true;
+    this.lastMotionTime = now;
 
     if (t < 1) {
+      this.render();
       this.animationId = requestAnimationFrame(this.boundCameraAnimFrame);
     } else {
+      // Animation complete - do full render with no time budget
       this.animationId = null;
+      this.inMotion = false;
+      this.motionCacheValid = false;
+      this.render();
     }
   }
 
@@ -1935,7 +2067,13 @@ export class Renderer {
 
     if (!this.edgeAABBs || !this.edgeBufU8) return 0;
 
-    // Fast path: if viewport contains ALL edges, upload full buffer directly (no copying)
+    // Motion optimization: reuse cached edges during rapid pan/zoom
+    // This ensures consistent visuals during motion without re-culling every frame
+    if (this.inMotion && this.motionCacheValid) {
+      return this.motionEdgeCount;
+    }
+
+    // Fast path: if viewport contains ALL edges, upload full buffer
     if (
       vpMinX <= this.allEdgesMinX &&
       vpMinY <= this.allEdgesMinY &&
@@ -1952,6 +2090,11 @@ export class Renderer {
         this.edgeBufferUploaded = true;
       }
       this.visibleEdgeCount = total;
+      // Cache result for motion frames
+      if (this.inMotion) {
+        this.motionCacheValid = true;
+        this.motionEdgeCount = total;
+      }
       return total;
     }
 
@@ -1964,20 +2107,111 @@ export class Renderer {
     const dstBuf = this.visibleEdgeBuf!;
     let visibleCount = 0;
 
-    for (let i = 0; i < total; i++) {
-      const aabbIdx = i * 4;
-      const eMinX = aabb[aabbIdx];
-      const eMinY = aabb[aabbIdx + 1];
-      const eMaxX = aabb[aabbIdx + 2];
-      const eMaxY = aabb[aabbIdx + 3];
+    // Time budget: 8ms during motion to maintain 60fps, unlimited when idle
+    const frameBudgetMs = this.inMotion ? 8 : Infinity;
+    const startTime = performance.now();
 
-      // AABB-AABB intersection test
-      if (eMaxX >= vpMinX && eMinX <= vpMaxX && eMaxY >= vpMinY && eMinY <= vpMaxY) {
-        // Visible: copy edge data
+    // Use grid spatial index for O(visible cells) culling instead of O(n)
+    const grid = this.edgeGrid;
+    const gridCounts = this.edgeGridCounts;
+    const visited = this.visitedEdges;
+
+    if (grid && gridCounts && visited) {
+      // Compute which cells overlap the viewport
+      const gridCellsX = this.gridCellsX;
+      const gridCellsY = this.gridCellsY;
+      const gridMinX = this.gridMinX;
+      const gridMinY = this.gridMinY;
+      const cellW = this.gridCellW;
+      const cellH = this.gridCellH;
+
+      const minCellX = Math.max(0, Math.min(gridCellsX - 1, Math.floor((vpMinX - gridMinX) / cellW)));
+      const minCellY = Math.max(0, Math.min(gridCellsY - 1, Math.floor((vpMinY - gridMinY) / cellH)));
+      const maxCellX = Math.max(0, Math.min(gridCellsX - 1, Math.floor((vpMaxX - gridMinX) / cellW)));
+      const maxCellY = Math.max(0, Math.min(gridCellsY - 1, Math.floor((vpMaxY - gridMinY) / cellH)));
+
+      // Clear visited bitset
+      const bitsetSize = Math.ceil(total / 8);
+      for (let b = 0; b < bitsetSize; b++) visited[b] = 0;
+
+      // Ensure indices buffer has capacity
+      if (!this.visibleEdgeIndices || this.visibleEdgeIndices.length < total) {
+        this.visibleEdgeIndices = new Uint32Array(total);
+      }
+      const indices = this.visibleEdgeIndices;
+      let indexCount = 0;
+
+      // Collect visible edge indices (don't copy yet - need to sort for zIndex order)
+      let edgesProcessed = 0;
+      outer: for (let cy = minCellY; cy <= maxCellY; cy++) {
+        for (let cx = minCellX; cx <= maxCellX; cx++) {
+          const cellIdx = cy * gridCellsX + cx;
+          const cell = grid[cellIdx];
+          const count = gridCounts[cellIdx];
+
+          for (let j = 0; j < count; j++) {
+            // Check time budget every 512 edges
+            if ((edgesProcessed & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
+              break outer;
+            }
+            edgesProcessed++;
+
+            const i = cell[j];
+            const byteIdx = i >> 3;
+            const bitMask = 1 << (i & 7);
+
+            // Skip if already visited
+            if (visited[byteIdx] & bitMask) continue;
+            visited[byteIdx] |= bitMask;
+
+            const aabbIdx = i * 4;
+            const eMinX = aabb[aabbIdx];
+            const eMinY = aabb[aabbIdx + 1];
+            const eMaxX = aabb[aabbIdx + 2];
+            const eMaxY = aabb[aabbIdx + 3];
+
+            // AABB-AABB intersection test (edge might span multiple cells but not intersect viewport)
+            if (eMaxX >= vpMinX && eMinX <= vpMaxX && eMaxY >= vpMinY && eMinY <= vpMaxY) {
+              indices[indexCount++] = i;
+            }
+          }
+        }
+      }
+
+      // Sort indices to restore zIndex order (edges are packed in zIndex order)
+      const sortedIndices = indices.subarray(0, indexCount);
+      sortedIndices.sort();
+
+      // Copy edges in sorted order
+      for (let k = 0; k < indexCount; k++) {
+        const i = sortedIndices[k];
         const srcOffset = i * EDGE_STRIDE;
         const dstOffset = visibleCount * EDGE_STRIDE;
         dstBuf.set(srcBuf.subarray(srcOffset, srcOffset + EDGE_STRIDE), dstOffset);
         visibleCount++;
+      }
+    } else {
+      // Fallback: linear scan if grid not available
+      for (let i = 0; i < total; i++) {
+        // Check time budget every 512 edges
+        if ((i & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
+          break;
+        }
+
+        const aabbIdx = i * 4;
+        const eMinX = aabb[aabbIdx];
+        const eMinY = aabb[aabbIdx + 1];
+        const eMaxX = aabb[aabbIdx + 2];
+        const eMaxY = aabb[aabbIdx + 3];
+
+        // AABB-AABB intersection test
+        if (eMaxX >= vpMinX && eMinX <= vpMaxX && eMaxY >= vpMinY && eMinY <= vpMaxY) {
+          // Visible: copy edge data
+          const srcOffset = i * EDGE_STRIDE;
+          const dstOffset = visibleCount * EDGE_STRIDE;
+          dstBuf.set(srcBuf.subarray(srcOffset, srcOffset + EDGE_STRIDE), dstOffset);
+          visibleCount++;
+        }
       }
     }
 
@@ -1995,6 +2229,13 @@ export class Renderer {
     }
 
     this.visibleEdgeCount = visibleCount;
+
+    // Cache result for subsequent motion frames
+    if (this.inMotion) {
+      this.motionCacheValid = true;
+      this.motionEdgeCount = visibleCount;
+    }
+
     return visibleCount;
   }
 
@@ -2113,6 +2354,7 @@ export class Renderer {
 
   destroy(): void {
     clearTimeout(this.tapTimeoutId);
+    if (this.motionEndTimeout) clearTimeout(this.motionEndTimeout);
     this.abortController.abort();
     this.cancelAnimation();
     if (this.dataAnimId !== null) {
