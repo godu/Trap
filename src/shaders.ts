@@ -9,6 +9,7 @@ uniform vec2 u_scale;
 uniform vec2 u_offset;
 uniform float u_minRadius;
 uniform float u_maxRadius;
+uniform vec4 u_viewport;
 
 flat out vec4 v_color;
 out vec2 v_uv;
@@ -16,9 +17,17 @@ flat out float v_iconIndex;
 flat out float v_worldRadius;
 
 void main() {
+  float radius = clamp(a_radius, u_minRadius, u_maxRadius);
+
+  // Viewport frustum cull — hide nodes fully outside visible area
+  if (a_position.x + radius < u_viewport.x || a_position.x - radius > u_viewport.z ||
+      a_position.y + radius < u_viewport.y || a_position.y - radius > u_viewport.w) {
+    gl_Position = vec4(2.0, 2.0, 0.0, 1.0);
+    return;
+  }
+
   v_color = a_color;
   v_uv = a_quadVertex;
-  float radius = clamp(a_radius, u_minRadius, u_maxRadius);
   v_iconIndex = a_iconIndex;
   v_worldRadius = radius;
   vec2 worldPos = a_position + a_quadVertex * radius;
@@ -43,6 +52,7 @@ out vec4 outColor;
 
 void main() {
   float dist = dot(v_uv, v_uv);
+  if (dist > 1.0) discard;
   float alpha = 1.0 - smoothstep(0.81, 1.0, dist);
   float a = alpha * v_color.a;
   vec4 base = vec4(v_color.rgb * a, a);
