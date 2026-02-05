@@ -32,9 +32,17 @@ Read the project's CLAUDE.md files first to understand current architecture and 
 - **Buffer uploads**: avoid re-uploading unchanged data. Only call `bufferSubData`/`bufferData` when contents change.
 - **Uniform caching**: track last-set values; skip redundant `gl.uniform*` calls.
 - **State changes**: batch by program, blend mode, VAO. Minimize `useProgram`, `enable`/`disable`, `blendFunc` switches per frame.
-- **Shader efficiency**: move invariant math from fragment to vertex shader. Avoid branching in fragments. Use `step`/`smoothstep` over `if`.
 - **Culling**: frustum-cull before submitting instances. Use degenerate output in shaders for off-screen geometry.
 - **Texture & framebuffer**: avoid creating/destroying per frame. Reuse and resize.
+
+## Shader Optimization
+
+- **Precision**: Use `lowp` for colors, `mediump` for positions when possible.
+- **Branching**: Replace `if` with `step()`/`mix()` for branchless code.
+- **Early exit**: Use degenerate `gl_Position = vec4(2.0, 2.0, 0.0, 1.0)` for culled instances.
+- **Invariants**: Mark vertex outputs as `flat` when not interpolated.
+- **Divisions**: Precompute `1/x` and multiply instead of dividing.
+- **Fragment cost**: Move invariant math from fragment to vertex shader.
 
 ## JS Runtime
 
@@ -52,9 +60,18 @@ Read the project's CLAUDE.md files first to understand current architecture and 
 - **Alignment**: typed array views must not create unaligned access (offset divisible by element byte size).
 - **Packing**: pack small values (colors, flags) into fewer bytes where the GPU format allows it.
 
+## Memory Leaks
+
+- Check `destroy()` deletes all GPU resources (buffers, VAOs, programs, textures).
+- Verify event listeners use AbortController for cleanup.
+- Clear timeouts/intervals in destroy.
+- Null out references to allow GC.
+
 ## Process
 
-1. Read the code under analysis
-2. Identify issues by checklist priority (GPU bottlenecks first, then JS runtime, then layout)
-3. For each issue: state what it is (one line), apply the fix, add a brief comment if non-obvious
-4. Run tests after applying changes
+1. **Profile**: Use DevTools to identify actual bottlenecks (don't guess)
+2. **Grep audit**: Search for `new `, `.forEach`, `...` in hot paths
+3. **Prioritize**: GPU bottlenecks > JS runtime > data layout
+4. **Fix incrementally**: One change at a time, test after each
+5. **Verify**: Run `npm test`, check FPS, confirm visual correctness
+6. **Document**: Add comments explaining non-obvious optimizations
