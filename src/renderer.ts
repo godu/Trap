@@ -366,6 +366,14 @@ export class Renderer {
   private boundDataAnimFrame!: (now: number) => void;
   private boundCameraAnimFrame!: (now: number) => void;
   private boundRenderCallback!: () => void;
+  private boundZoomAnimFrame!: () => void;
+
+  // Zoom animation state (lerp-based smooth zoom)
+  private zoomTargetHalfW = 0;
+  private zoomTargetHalfH = 0;
+  private zoomTargetCenterX = 0;
+  private zoomTargetCenterY = 0;
+  private zoomAnimating = false;
 
   // Projection dirty flag (avoid recomputing when camera unchanged)
   private projectionDirty = true;
@@ -515,6 +523,7 @@ export class Renderer {
     this.boundDataAnimFrame = this.dataAnimFrame.bind(this);
     this.boundCameraAnimFrame = this.cameraAnimFrame.bind(this);
     this.boundRenderCallback = this.renderCallback.bind(this);
+    this.boundZoomAnimFrame = this.zoomAnimFrame.bind(this);
 
     this.resize();
     this.initCamera();
@@ -1547,6 +1556,7 @@ export class Renderer {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+    this.zoomAnimating = false;
   }
 
   private requestRender(): void {
@@ -1564,12 +1574,52 @@ export class Renderer {
   private zoomAt(screenX: number, screenY: number, factor: number): void {
     this.cancelAnimation();
     const world = this.screenToWorld(screenX, screenY);
-    this.centerX = world.x + (this.centerX - world.x) * factor;
-    this.centerY = world.y + (this.centerY - world.y) * factor;
-    this.halfW *= factor;
-    this.halfH *= factor;
+
+    // Initialize target from current if not animating
+    if (!this.zoomAnimating) {
+      this.zoomTargetHalfW = this.halfW;
+      this.zoomTargetHalfH = this.halfH;
+      this.zoomTargetCenterX = this.centerX;
+      this.zoomTargetCenterY = this.centerY;
+    }
+
+    // Update target (accumulate zoom)
+    this.zoomTargetCenterX = world.x + (this.zoomTargetCenterX - world.x) * factor;
+    this.zoomTargetCenterY = world.y + (this.zoomTargetCenterY - world.y) * factor;
+    this.zoomTargetHalfW *= factor;
+    this.zoomTargetHalfH *= factor;
+
+    // Start animation if not running
+    if (!this.zoomAnimating) {
+      this.zoomAnimating = true;
+      requestAnimationFrame(this.boundZoomAnimFrame);
+    }
+  }
+
+  private zoomAnimFrame(): void {
+    const t = 0.2; // lerp factor (20% per frame)
+
+    this.centerX += (this.zoomTargetCenterX - this.centerX) * t;
+    this.centerY += (this.zoomTargetCenterY - this.centerY) * t;
+    this.halfW += (this.zoomTargetHalfW - this.halfW) * t;
+    this.halfH += (this.zoomTargetHalfH - this.halfH) * t;
     this.projectionDirty = true;
-    this.requestRender();
+    this.render();
+
+    // Continue if not close enough
+    const epsilon = 0.001;
+    if (Math.abs(this.halfW - this.zoomTargetHalfW) > epsilon * this.zoomTargetHalfW) {
+      requestAnimationFrame(this.boundZoomAnimFrame);
+    } else {
+      // Snap to target and stop
+      this.centerX = this.zoomTargetCenterX;
+      this.centerY = this.zoomTargetCenterY;
+      this.halfW = this.zoomTargetHalfW;
+      this.halfH = this.zoomTargetHalfH;
+      this.zoomAnimating = false;
+      this.projectionDirty = true;
+      this.render();
+    }
   }
 
   private pan(screenDx: number, screenDy: number): void {
