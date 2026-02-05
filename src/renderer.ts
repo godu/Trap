@@ -2121,9 +2121,9 @@ export class Renderer {
       const maxCellX = Math.max(0, Math.min(gridCellsX - 1, Math.floor((vpMaxX - gridMinX) / cellW)));
       const maxCellY = Math.max(0, Math.min(gridCellsY - 1, Math.floor((vpMaxY - gridMinY) / cellH)));
 
-      // Clear visited bitset
+      // Clear visited bitset (fill is faster than manual loop)
       const bitsetSize = Math.ceil(total / 8);
-      for (let b = 0; b < bitsetSize; b++) visited[b] = 0;
+      visited.fill(0, 0, bitsetSize);
 
       // Ensure indices buffer has capacity
       if (!this.visibleEdgeIndices || this.visibleEdgeIndices.length < total) {
