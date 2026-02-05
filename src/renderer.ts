@@ -1293,6 +1293,7 @@ export class Renderer {
     this.allEdgesMaxX = allMaxX;
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false;
+    this.motionCacheValid = false; // Force re-upload of interpolated edge positions
     this.buildEdgeGrid(count);
     // GPU upload deferred to render() which will cull and upload only visible edges
   }
