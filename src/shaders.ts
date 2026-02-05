@@ -96,6 +96,7 @@ uniform vec4 u_viewport;
 uniform float u_minRadius;
 uniform float u_maxRadius;
 uniform float u_pxPerWorld;
+uniform float u_invPxPerWorld;
 
 flat out vec4 v_color;
 out float v_edgeDist;
@@ -176,7 +177,7 @@ void main() {
   float perpOffset = a_template.y * effectiveWidth;
 
   // 1px AA expansion outward (shaft only)
-  perpOffset += (1.0 - s0) * sign(a_template.y) / max(u_pxPerWorld, 0.001);
+  perpOffset += (1.0 - s0) * sign(a_template.y) * u_invPxPerWorld;
 
   float effectiveHwPx = max(shaftHwPx, 0.5);
   v_edgeDist = mix(perpOffset * u_pxPerWorld, 0.0, s0);
@@ -195,7 +196,7 @@ void main() {
   // Tangent: B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
   vec2 tangent = 2.0 * omt * (ctrl - a_source) + 2.0 * t * (a_target - ctrl);
   float tanLen = length(tangent);
-  vec2 tanDir = tangent / max(tanLen, 0.0001);
+  vec2 tanDir = tangent * (1.0 / max(tanLen, 0.0001));
   vec2 perpDir = vec2(-tanDir.y, tanDir.x);
 
   vec2 pos = curvePos + perpDir * perpOffset;

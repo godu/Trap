@@ -246,6 +246,7 @@ export class Renderer {
   private edgeMinRadiusLocation: WebGLUniformLocation;
   private edgeMaxRadiusLocation: WebGLUniformLocation;
   private edgePxPerWorldLocation: WebGLUniformLocation;
+  private edgeInvPxPerWorldLocation!: WebGLUniformLocation;
   private edgeInstanceBuffer!: WebGLBuffer;
   private edgeTemplateBuffer!: WebGLBuffer;
   private edgeIndexBuffer!: WebGLBuffer;
@@ -382,6 +383,7 @@ export class Renderer {
   // Hover state
   private hoveredNodeId: string | null = null;
   private hoveredEdgeId: string | null = null;
+  private currentCursor = "";
 
   // Pre-allocated event objects (reused to avoid GC pressure on mousemove)
   private readonly nodeEventPool: NodeEvent = { type: "", nodeId: "", node: null!, worldX: 0, worldY: 0, originalEvent: null! };
@@ -560,6 +562,7 @@ export class Renderer {
     this.edgeMinRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_minRadius")!;
     this.edgeMaxRadiusLocation = gl.getUniformLocation(this.edgeProgram, "u_maxRadius")!;
     this.edgePxPerWorldLocation = gl.getUniformLocation(this.edgeProgram, "u_pxPerWorld")!;
+    this.edgeInvPxPerWorldLocation = gl.getUniformLocation(this.edgeProgram, "u_invPxPerWorld")!;
 
     this.edgeVao = this.setupEdgeGeometry(gl);
 
@@ -855,7 +858,9 @@ export class Renderer {
 
     // Initialize grid arrays if needed (reallocate if size changed)
     if (!this.edgeGrid || this.edgeGrid.length !== cellCount) {
-      this.edgeGrid = Array.from({ length: cellCount }, () => new Uint32Array(64));
+      const grid: Uint32Array[] = [];
+      for (let i = 0; i < cellCount; i++) grid.push(new Uint32Array(64));
+      this.edgeGrid = grid;
       this.edgeGridCounts = new Uint32Array(cellCount);
     }
 
@@ -927,10 +932,7 @@ export class Renderer {
   }
 
   /** Pack Edge objects into a GPU buffer, resolving positions from nodeMap. Sorted by zIndex. */
-  private packEdgeBuffer(edges: Edge[]): {
-    buffer: Uint8Array;
-    count: number;
-  } {
+  private packEdgeBuffer(edges: Edge[]): void {
     // Reuse scratch array to avoid allocation
     const sorted = this.edgeSortBuf;
     sorted.length = edges.length;
@@ -1001,10 +1003,6 @@ export class Renderer {
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false; // mark buffer as needing upload
     this.buildEdgeGrid(count);
-    return {
-      buffer: this.edgeBufU8!.subarray(0, count * EDGE_STRIDE),
-      count,
-    };
   }
 
   private setEdgeObjects(edges: Edge[], animate: boolean): void {
@@ -1417,10 +1415,17 @@ export class Renderer {
 
   // --- Event system ---
 
+  private setCursor(value: string): void {
+    if (this.currentCursor !== value) {
+      this.canvas.style.cursor = value;
+      this.currentCursor = value;
+    }
+  }
+
   private setupInteraction(): void {
     const signal = this.abortController.signal;
     const canvas = this.canvas;
-    canvas.style.cursor = "default";
+    this.setCursor("default");
 
     // Wheel: mouse wheel → zoom, trackpad scroll → pan
     canvas.addEventListener(
@@ -1447,7 +1452,7 @@ export class Renderer {
         this.lastMouseY = e.clientY;
         this.dragStartX = e.clientX;
         this.dragStartY = e.clientY;
-        canvas.style.cursor = "grabbing";
+        this.setCursor("grabbing");
       },
       { signal },
     );
@@ -1479,7 +1484,7 @@ export class Renderer {
             this.handleClick(e.clientX, e.clientY, e);
           }
           this.isDragging = false;
-          canvas.style.cursor = "default";
+          this.setCursor("default");
         }
       },
       { signal },
@@ -1727,7 +1732,7 @@ export class Renderer {
         this.hoveredEdgeId = edgeId;
       }
 
-      this.canvas.style.cursor = "default";
+      this.setCursor("default");
     } else {
       // Hovering a node — clear any edge hover
       if (this.hoveredEdgeId) {
@@ -1739,7 +1744,7 @@ export class Renderer {
         }
         this.hoveredEdgeId = null;
       }
-      this.canvas.style.cursor = "default";
+      this.setCursor("default");
     }
   }
 
@@ -2348,6 +2353,7 @@ export class Renderer {
       const pxPerWorld = projScaleX * canvasW * 0.5;
       if (pxPerWorld !== this.sentEdgePxPerWorld) {
         gl.uniform1f(this.edgePxPerWorldLocation, pxPerWorld);
+        gl.uniform1f(this.edgeInvPxPerWorldLocation, 1.0 / Math.max(pxPerWorld, 0.001));
         this.sentEdgePxPerWorld = pxPerWorld;
       }
       // Inline bindVao to avoid function call overhead

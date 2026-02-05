@@ -42,8 +42,8 @@ export function computeFitView(
   const padding = 0.1;
   const dataW = bounds.maxX - bounds.minX;
   const dataH = bounds.maxY - bounds.minY;
-  const centerX = (bounds.minX + bounds.maxX) / 2;
-  const centerY = (bounds.minY + bounds.maxY) / 2;
+  const centerX = (bounds.minX + bounds.maxX) * 0.5;
+  const centerY = (bounds.minY + bounds.maxY) * 0.5;
 
   const aspect = canvasWidth / canvasHeight;
   const dataAspect = dataW / dataH;
@@ -52,10 +52,10 @@ export function computeFitView(
   let halfH: number;
 
   if (dataAspect > aspect) {
-    halfW = (dataW * (1 + padding)) / 2;
+    halfW = dataW * (1 + padding) * 0.5;
     halfH = halfW / aspect;
   } else {
-    halfH = (dataH * (1 + padding)) / 2;
+    halfH = dataH * (1 + padding) * 0.5;
     halfW = halfH * aspect;
   }
 
