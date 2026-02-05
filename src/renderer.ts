@@ -370,6 +370,7 @@ export class Renderer {
   private boundCameraAnimFrame!: (now: number) => void;
   private boundRenderCallback!: () => void;
   private boundZoomAnimFrame!: () => void;
+  private boundCheckMotionEnd!: () => void;
 
   // Zoom animation state (lerp-based smooth zoom)
   private zoomTargetHalfW = 0;
@@ -565,6 +566,7 @@ export class Renderer {
     this.boundCameraAnimFrame = this.cameraAnimFrame.bind(this);
     this.boundRenderCallback = this.renderCallback.bind(this);
     this.boundZoomAnimFrame = this.zoomAnimFrame.bind(this);
+    this.boundCheckMotionEnd = this.checkMotionEnd.bind(this);
 
     this.resize();
     this.initCamera();
@@ -1805,20 +1807,22 @@ export class Renderer {
 
     // Schedule a delayed render to do full culling after motion stops
     if (this.inMotion && !this.motionEndTimeout) {
-      const checkMotionEnd = () => {
-        this.motionEndTimeout = null;
-        if (!this.inMotion) return; // already handled
-        if (performance.now() - this.lastMotionTime > 50) {
-          // Motion stopped - do full render
-          this.inMotion = false;
-          this.motionCacheValid = false;
-          this.render();
-        } else {
-          // Still moving - check again later
-          this.motionEndTimeout = setTimeout(checkMotionEnd, 60);
-        }
-      };
-      this.motionEndTimeout = setTimeout(checkMotionEnd, 60);
+      this.motionEndTimeout = setTimeout(this.boundCheckMotionEnd, 60);
+    }
+  }
+
+  /** Check if motion stopped; schedule full render or reschedule check. */
+  private checkMotionEnd(): void {
+    this.motionEndTimeout = null;
+    if (!this.inMotion) return; // already handled
+    if (performance.now() - this.lastMotionTime > 50) {
+      // Motion stopped - do full render
+      this.inMotion = false;
+      this.motionCacheValid = false;
+      this.render();
+    } else {
+      // Still moving - check again later
+      this.motionEndTimeout = setTimeout(this.boundCheckMotionEnd, 60);
     }
   }
 
