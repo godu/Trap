@@ -2021,15 +2021,18 @@ export class Renderer {
         this.iconAtlasTexture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
       }
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
+      // Allocate full mipmap chain for better cache efficiency on zoom-out
+      const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
+      gl.texStorage2D(gl.TEXTURE_2D, levels, gl.RGBA8, w, h);
       this.iconAtlasAllocatedW = w;
       this.iconAtlasAllocatedH = h;
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.generateMipmap(gl.TEXTURE_2D);
     this.iconAtlasColumns = columns;
     this.iconAtlasRows = rows;
 
