@@ -290,7 +290,6 @@ export class Renderer {
   private sentEdgeMinRadius = NaN;
   private sentEdgeMaxRadius = NaN;
   private sentEdgePxPerWorld = NaN;
-  private sentIconLodRadius = NaN;
 
   // Icon atlas state
   private iconAtlasTexture: WebGLTexture | null = null;
@@ -301,8 +300,6 @@ export class Renderer {
   private iconAtlasLocation: WebGLUniformLocation | null = null;
   private iconAtlasColsLocation: WebGLUniformLocation | null = null;
   private iconAtlasRowsLocation: WebGLUniformLocation | null = null;
-  private iconLodRadiusLocation: WebGLUniformLocation | null = null;
-  private iconLodRadius: number;
 
   // Active GL state tracking (avoid redundant useProgram/bindVertexArray/bindTexture)
   private activeProgram: WebGLProgram | null = null;
@@ -355,6 +352,7 @@ export class Renderer {
   private onEdgeHoverLeave?: (e: EdgeEvent) => void;
   private onBackgroundClick?: (e: BackgroundEvent) => void;
   private onBackgroundDblClick?: (e: BackgroundEvent) => void;
+  private onRender?: () => void;
 
   // Hover state
   private hoveredNodeId: string | null = null;
@@ -414,6 +412,7 @@ export class Renderer {
     this.onEdgeHoverLeave = options.onEdgeHoverLeave;
     this.onBackgroundClick = options.onBackgroundClick;
     this.onBackgroundDblClick = options.onBackgroundDblClick;
+    this.onRender = options.onRender;
 
     // Animation config
     if (options.animationDuration !== undefined) {
@@ -452,8 +451,6 @@ export class Renderer {
     this.iconAtlasLocation = gl.getUniformLocation(this.program, "u_iconAtlas");
     this.iconAtlasColsLocation = gl.getUniformLocation(this.program, "u_atlasColumns");
     this.iconAtlasRowsLocation = gl.getUniformLocation(this.program, "u_atlasRows");
-    this.iconLodRadiusLocation = gl.getUniformLocation(this.program, "u_iconLodRadius");
-    this.iconLodRadius = options.iconLodRadius ?? 8;
 
     this.vao = this.setupGeometry(gl, options.nodes);
 
@@ -493,7 +490,7 @@ export class Renderer {
     if (options.edgeBuffer && options.edgeCount && options.edgeCount > 0) {
       this.edgeCount = options.edgeCount;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, options.edgeBuffer, gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, options.edgeBuffer, gl.DYNAMIC_DRAW);
       this.edgeGpuBytes = options.edgeCount * EDGE_STRIDE;
     }
 
@@ -800,7 +797,7 @@ export class Renderer {
     if (count > 0) {
       const gl = this.gl;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.DYNAMIC_DRAW);
       this.edgeGpuBytes = buffer.byteLength;
     }
   }
@@ -830,7 +827,7 @@ export class Renderer {
       const gl = this.gl;
       const src = new Uint8Array(buffer.buffer, buffer.byteOffset, edgeCount * EDGE_STRIDE);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, src, gl.STATIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, src, gl.DYNAMIC_DRAW);
       this.edgeGpuBytes = src.byteLength;
     }
     this.requestRender();
@@ -874,7 +871,7 @@ export class Renderer {
       this.edgeCount = count;
       if (count > 0) {
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.DYNAMIC_DRAW);
         this.edgeGpuBytes = buffer.byteLength;
       }
     }
@@ -937,7 +934,7 @@ export class Renderer {
         this.edgeCount = count;
         if (count > 0) {
           this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
-          this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.STATIC_DRAW);
+          this.gl.bufferData(this.gl.ARRAY_BUFFER, buffer, this.gl.DYNAMIC_DRAW);
           this.edgeGpuBytes = buffer.byteLength;
         }
       }
@@ -949,6 +946,7 @@ export class Renderer {
       this.targetEdges = [];
       this.sortedTargetNodes = null;
       this.sortedTargetEdges = null;
+      this.interpNodePool.length = 0;
     }
   }
 
@@ -1164,13 +1162,19 @@ export class Renderer {
     const canvas = this.canvas;
     canvas.style.cursor = "default";
 
-    // Wheel zoom
+    // Wheel: scroll → pan, pinch → zoom
     canvas.addEventListener(
       "wheel",
       (e) => {
         e.preventDefault();
-        const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
-        this.zoomAt(e.clientX, e.clientY, factor);
+        if (e.ctrlKey) {
+          // Pinch gesture on trackpad
+          const factor = e.deltaY > 0 ? 1.1 : 1 / 1.1;
+          this.zoomAt(e.clientX, e.clientY, factor);
+        } else {
+          // Two-finger scroll → pan
+          this.pan(-e.deltaX, -e.deltaY);
+        }
       },
       { signal, passive: false },
     );
@@ -1270,17 +1274,12 @@ export class Renderer {
           const dy = touches[0].clientY - this.touch0Y;
           this.pan(dx, dy);
         } else if (touches.length >= 2 && prevCount >= 2) {
-          // Pinch zoom + pan
-          const odx = this.touch0X - this.touch1X;
-          const ody = this.touch0Y - this.touch1Y;
-          const oldDist = Math.sqrt(odx * odx + ody * ody);
-          const ndx = touches[0].clientX - touches[1].clientX;
-          const ndy = touches[0].clientY - touches[1].clientY;
-          const newDist = Math.sqrt(ndx * ndx + ndy * ndy);
-          const factor = oldDist / newDist;
-          const midX = (touches[0].clientX + touches[1].clientX) / 2;
-          const midY = (touches[0].clientY + touches[1].clientY) / 2;
-          this.zoomAt(midX, midY, factor);
+          // Two-finger pan
+          const oldMidX = (this.touch0X + this.touch1X) / 2;
+          const oldMidY = (this.touch0Y + this.touch1Y) / 2;
+          const newMidX = (touches[0].clientX + touches[1].clientX) / 2;
+          const newMidY = (touches[0].clientY + touches[1].clientY) / 2;
+          this.pan(newMidX - oldMidX, newMidY - oldMidY);
         }
 
         this.storeTouches(touches);
@@ -1836,13 +1835,10 @@ export class Renderer {
       gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
       this.activeTexture = this.iconAtlasTexture;
     }
-    const lodRadius = this.iconLodRadius * worldPerCssPx;
-    if (lodRadius !== this.sentIconLodRadius) {
-      gl.uniform1f(this.iconLodRadiusLocation!, lodRadius);
-      this.sentIconLodRadius = lodRadius;
-    }
     this.bindVao(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
+
+    this.onRender?.();
   }
 
   destroy(): void {
