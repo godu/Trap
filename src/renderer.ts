@@ -64,6 +64,11 @@ function easeOutCubic(t: number): number {
   return 1 - k * k * k;
 }
 
+/** Pre-allocated comparator for zIndex sorting (avoids closure per sort call) */
+function compareZIndex(a: { zIndex?: number }, b: { zIndex?: number }): number {
+  return (a.zIndex ?? 0) - (b.zIndex ?? 0);
+}
+
 /** Pack premultiplied RGBA into a uint32 (little-endian: R | G<<8 | B<<16 | A<<24) */
 function packPremultiplied(r: number, g: number, b: number, a: number): number {
   return (
@@ -340,6 +345,8 @@ export class Renderer {
 
   // Cached layout values
   private cachedRect: DOMRect | null = null;
+  private cachedInvWidth = 0;
+  private cachedInvHeight = 0;
   private cachedDpr = 1;
 
   // Reusable world-coordinate result (avoids allocation per event)
@@ -708,7 +715,7 @@ export class Renderer {
     const sorted = this.nodeSortBuf;
     sorted.length = nodes.length;
     for (let i = 0; i < nodes.length; i++) sorted[i] = nodes[i];
-    sorted.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    sorted.sort(compareZIndex);
     this.ensureNodeBuffer(sorted.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
@@ -937,7 +944,7 @@ export class Renderer {
     const sorted = this.edgeSortBuf;
     sorted.length = edges.length;
     for (let i = 0; i < edges.length; i++) sorted[i] = edges[i];
-    sorted.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    sorted.sort(compareZIndex);
     this.ensureEdgeBuffer(sorted.length);
     this.ensureEdgeAABBBuffer(sorted.length);
     const f32 = this.edgeF32!;
@@ -1119,7 +1126,7 @@ export class Renderer {
     const sortedNodes = this.nodeSortBuf;
     sortedNodes.length = rawNodes.length;
     for (let i = 0; i < rawNodes.length; i++) sortedNodes[i] = rawNodes[i];
-    sortedNodes.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    sortedNodes.sort(compareZIndex);
     this.sortedTargetNodes = sortedNodes;
 
     const rawEdges = this.targetEdges.length > 0 ? this.targetEdges : this.edgeObjects;
@@ -1128,7 +1135,7 @@ export class Renderer {
       const sortedEdges = this.edgeAnimSortBuf;
       sortedEdges.length = rawEdges.length;
       for (let i = 0; i < rawEdges.length; i++) sortedEdges[i] = rawEdges[i];
-      sortedEdges.sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+      sortedEdges.sort(compareZIndex);
       this.sortedTargetEdges = sortedEdges;
     } else {
       this.sortedTargetEdges = null;
@@ -1384,7 +1391,7 @@ export class Renderer {
       if (!src || !tgt) continue;
 
       // Per-edge tolerance = 5px + half the rendered edge width
-      const halfW = (edge.width ?? 1.0) / 2;
+      const halfW = (edge.width ?? 1.0) * 0.5;
       const edgeTol = baseTol + halfW;
 
       // Compute Bezier control point (simplified: len cancels in (-dy/len)*len*CURVATURE)
@@ -1762,15 +1769,18 @@ export class Renderer {
 
   private getRect(): DOMRect {
     if (!this.cachedRect) {
-      this.cachedRect = this.canvas.getBoundingClientRect();
+      const r = this.canvas.getBoundingClientRect();
+      this.cachedRect = r;
+      this.cachedInvWidth = 1 / r.width;
+      this.cachedInvHeight = 1 / r.height;
     }
     return this.cachedRect;
   }
 
   private screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
     const rect = this.getRect();
-    const nx = (screenX - rect.left) / rect.width;
-    const ny = (screenY - rect.top) / rect.height;
+    const nx = (screenX - rect.left) * this.cachedInvWidth;
+    const ny = (screenY - rect.top) * this.cachedInvHeight;
     this.worldResult.x = this.centerX + (nx - 0.5) * 2 * this.halfW;
     this.worldResult.y = this.centerY - (ny - 0.5) * 2 * this.halfH;
     return this.worldResult;
@@ -1827,8 +1837,8 @@ export class Renderer {
 
     // Compute world position inline to avoid function call overhead
     const rect = this.getRect();
-    const nx = (screenX - rect.left) / rect.width;
-    const ny = (screenY - rect.top) / rect.height;
+    const nx = (screenX - rect.left) * this.cachedInvWidth;
+    const ny = (screenY - rect.top) * this.cachedInvHeight;
     const worldX = this.centerX + (nx - 0.5) * 2 * this.halfW;
     const worldY = this.centerY - (ny - 0.5) * 2 * this.halfH;
 
@@ -1898,8 +1908,8 @@ export class Renderer {
   private pinchZoom(screenX: number, screenY: number, factor: number): void {
     this.cancelAnimation();
     const rect = this.getRect();
-    const nx = (screenX - rect.left) / rect.width;
-    const ny = (screenY - rect.top) / rect.height;
+    const nx = (screenX - rect.left) * this.cachedInvWidth;
+    const ny = (screenY - rect.top) * this.cachedInvHeight;
     const worldX = this.centerX + (nx - 0.5) * 2 * this.halfW;
     const worldY = this.centerY - (ny - 0.5) * 2 * this.halfH;
 
@@ -1914,9 +1924,9 @@ export class Renderer {
 
   private pan(screenDx: number, screenDy: number): void {
     this.cancelAnimation();
-    const rect = this.getRect();
-    this.centerX -= (screenDx / rect.width) * 2 * this.halfW;
-    this.centerY += (screenDy / rect.height) * 2 * this.halfH;
+    this.getRect(); // ensure cachedInvWidth/Height are populated
+    this.centerX -= screenDx * this.cachedInvWidth * 2 * this.halfW;
+    this.centerY += screenDy * this.cachedInvHeight * 2 * this.halfH;
     this.projectionDirty = true;
     this.inMotion = true;
     this.lastMotionTime = performance.now();
