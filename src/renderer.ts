@@ -1768,10 +1768,13 @@ export class Renderer {
   private updateProjection(): void {
     if (!this.projectionDirty) return;
     this.projectionDirty = false;
-    this.projScaleX = 1 / this.halfW;
-    this.projScaleY = 1 / this.halfH;
-    this.projOffsetX = -this.centerX / this.halfW;
-    this.projOffsetY = -this.centerY / this.halfH;
+    // Compute reciprocals once to turn 4 divisions into 2
+    const invHalfW = 1 / this.halfW;
+    const invHalfH = 1 / this.halfH;
+    this.projScaleX = invHalfW;
+    this.projScaleY = invHalfH;
+    this.projOffsetX = -this.centerX * invHalfW;
+    this.projOffsetY = -this.centerY * invHalfH;
     this.vpMinX = this.centerX - this.halfW;
     this.vpMinY = this.centerY - this.halfH;
     this.vpMaxX = this.centerX + this.halfW;
