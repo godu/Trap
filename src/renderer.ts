@@ -205,6 +205,7 @@ export class Renderer {
   private offsetLocation: WebGLUniformLocation;
   private nodeMinRadiusLocation: WebGLUniformLocation;
   private nodeMaxRadiusLocation: WebGLUniformLocation;
+  private nodeViewportLocation: WebGLUniformLocation;
   private nodes: Node[];
   private nodeInstanceBuffer!: WebGLBuffer;
 
@@ -277,6 +278,10 @@ export class Renderer {
   private sentEdgeVpMinY = NaN;
   private sentEdgeVpMaxX = NaN;
   private sentEdgeVpMaxY = NaN;
+  private sentNodeVpMinX = NaN;
+  private sentNodeVpMinY = NaN;
+  private sentNodeVpMaxX = NaN;
+  private sentNodeVpMaxY = NaN;
   // Radius clamping
   private minScreenRadius: number;
   private maxScreenRadius: number;
@@ -299,9 +304,10 @@ export class Renderer {
   private iconLodRadiusLocation: WebGLUniformLocation | null = null;
   private iconLodRadius: number;
 
-  // Active GL state tracking (avoid redundant useProgram/bindVertexArray)
+  // Active GL state tracking (avoid redundant useProgram/bindVertexArray/bindTexture)
   private activeProgram: WebGLProgram | null = null;
   private activeVao: WebGLVertexArrayObject | null = null;
+  private activeTexture: WebGLTexture | null = null;
 
   // Render throttling
   private renderPending = false;
@@ -442,6 +448,7 @@ export class Renderer {
 
     this.nodeMinRadiusLocation = gl.getUniformLocation(this.program, "u_minRadius")!;
     this.nodeMaxRadiusLocation = gl.getUniformLocation(this.program, "u_maxRadius")!;
+    this.nodeViewportLocation = gl.getUniformLocation(this.program, "u_viewport")!;
     this.iconAtlasLocation = gl.getUniformLocation(this.program, "u_iconAtlas");
     this.iconAtlasColsLocation = gl.getUniformLocation(this.program, "u_atlasColumns");
     this.iconAtlasRowsLocation = gl.getUniformLocation(this.program, "u_atlasRows");
@@ -1807,10 +1814,27 @@ export class Renderer {
       this.sentMinRadius = minR;
       this.sentMaxRadius = maxR;
     }
+    const vpMinX = this.vpMinX;
+    const vpMinY = this.vpMinY;
+    const vpMaxX = this.vpMaxX;
+    const vpMaxY = this.vpMaxY;
+    if (
+      vpMinX !== this.sentNodeVpMinX ||
+      vpMinY !== this.sentNodeVpMinY ||
+      vpMaxX !== this.sentNodeVpMaxX ||
+      vpMaxY !== this.sentNodeVpMaxY
+    ) {
+      gl.uniform4f(this.nodeViewportLocation, vpMinX, vpMinY, vpMaxX, vpMaxY);
+      this.sentNodeVpMinX = vpMinX;
+      this.sentNodeVpMinY = vpMinY;
+      this.sentNodeVpMaxX = vpMaxX;
+      this.sentNodeVpMaxY = vpMaxY;
+    }
     // Bind icon atlas texture and set LOD threshold
-    if (this.iconAtlasTexture) {
+    if (this.iconAtlasTexture && this.iconAtlasTexture !== this.activeTexture) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.iconAtlasTexture);
+      this.activeTexture = this.iconAtlasTexture;
     }
     const lodRadius = this.iconLodRadius * worldPerCssPx;
     if (lodRadius !== this.sentIconLodRadius) {
@@ -1841,6 +1865,7 @@ export class Renderer {
     if (this.iconAtlasTexture) {
       gl.deleteTexture(this.iconAtlasTexture);
       this.iconAtlasTexture = null;
+      this.activeTexture = null;
     }
 
     this.resizeObserver.disconnect();
