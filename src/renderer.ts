@@ -327,7 +327,6 @@ export class Renderer {
   private iconAtlasRows = 0;
   private iconAtlasLocation: WebGLUniformLocation | null = null;
   private iconAtlasColsLocation: WebGLUniformLocation | null = null;
-  private iconAtlasRowsLocation: WebGLUniformLocation | null = null;
   private iconInvAtlasColsLocation: WebGLUniformLocation | null = null;
   private iconInvAtlasRowsLocation: WebGLUniformLocation | null = null;
 
@@ -543,7 +542,6 @@ export class Renderer {
     this.nodeViewportLocation = gl.getUniformLocation(this.program, "u_viewport")!;
     this.iconAtlasLocation = gl.getUniformLocation(this.program, "u_iconAtlas");
     this.iconAtlasColsLocation = gl.getUniformLocation(this.program, "u_atlasColumns");
-    this.iconAtlasRowsLocation = gl.getUniformLocation(this.program, "u_atlasRows");
     this.iconInvAtlasColsLocation = gl.getUniformLocation(this.program, "u_invAtlasCols");
     this.iconInvAtlasRowsLocation = gl.getUniformLocation(this.program, "u_invAtlasRows");
 
@@ -983,13 +981,12 @@ export class Renderer {
       const absDx = dx < 0 ? -dx : dx;
       const absDy = dy < 0 ? -dy : dy;
       const curvePad = (absDx + absDy) * CURVATURE;
-      const maxR = Math.max(src.radius, tgt.radius);
-      const pad = maxR + curvePad;
+      const pad = (src.radius > tgt.radius ? src.radius : tgt.radius) + curvePad;
       const aabbSlot = count * 4;
-      const eMinX = Math.min(src.x, tgt.x) - pad;
-      const eMinY = Math.min(src.y, tgt.y) - pad;
-      const eMaxX = Math.max(src.x, tgt.x) + pad;
-      const eMaxY = Math.max(src.y, tgt.y) + pad;
+      const eMinX = (src.x < tgt.x ? src.x : tgt.x) - pad;
+      const eMinY = (src.y < tgt.y ? src.y : tgt.y) - pad;
+      const eMaxX = (src.x > tgt.x ? src.x : tgt.x) + pad;
+      const eMaxY = (src.y > tgt.y ? src.y : tgt.y) + pad;
       aabb[aabbSlot] = eMinX;
       aabb[aabbSlot + 1] = eMinY;
       aabb[aabbSlot + 2] = eMaxX;
@@ -1311,13 +1308,12 @@ export class Renderer {
       const absDx = dx < 0 ? -dx : dx;
       const absDy = dy < 0 ? -dy : dy;
       const curvePad = (absDx + absDy) * CURVATURE;
-      const maxR = Math.max(src.radius, tgt.radius);
-      const pad = maxR + curvePad;
+      const pad = (src.radius > tgt.radius ? src.radius : tgt.radius) + curvePad;
       const aabbSlot = count * 4;
-      const eMinX = Math.min(src.x, tgt.x) - pad;
-      const eMinY = Math.min(src.y, tgt.y) - pad;
-      const eMaxX = Math.max(src.x, tgt.x) + pad;
-      const eMaxY = Math.max(src.y, tgt.y) + pad;
+      const eMinX = (src.x < tgt.x ? src.x : tgt.x) - pad;
+      const eMinY = (src.y < tgt.y ? src.y : tgt.y) - pad;
+      const eMaxX = (src.x > tgt.x ? src.x : tgt.x) + pad;
+      const eMaxY = (src.y > tgt.y ? src.y : tgt.y) + pad;
       aabb[aabbSlot] = eMinX;
       aabb[aabbSlot + 1] = eMinY;
       aabb[aabbSlot + 2] = eMaxX;
@@ -1487,8 +1483,7 @@ export class Renderer {
         if (this.isDragging) {
           const dx = e.clientX - this.dragStartX;
           const dy = e.clientY - this.dragStartY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < CLICK_THRESHOLD) {
+          if (dx * dx + dy * dy < CLICK_THRESHOLD * CLICK_THRESHOLD) {
             this.handleClick(e.clientX, e.clientY, e);
           }
           this.isDragging = false;
@@ -1549,17 +1544,17 @@ export class Renderer {
           // Pinch zoom only (no pan on 2-finger)
           const oldDx = this.touch0X - this.touch1X;
           const oldDy = this.touch0Y - this.touch1Y;
-          const oldDist = Math.sqrt(oldDx * oldDx + oldDy * oldDy);
+          const oldDistSq = oldDx * oldDx + oldDy * oldDy;
 
           const newDx = touches[0].clientX - touches[1].clientX;
           const newDy = touches[0].clientY - touches[1].clientY;
-          const newDist = Math.sqrt(newDx * newDx + newDy * newDy);
+          const newDistSq = newDx * newDx + newDy * newDy;
 
           const newMidX = (touches[0].clientX + touches[1].clientX) * 0.5;
           const newMidY = (touches[0].clientY + touches[1].clientY) * 0.5;
 
-          if (oldDist > 1 && newDist > 1) {
-            const scale = oldDist / newDist; // >1 = zoom out, <1 = zoom in
+          if (oldDistSq > 1 && newDistSq > 1) {
+            const scale = Math.sqrt(oldDistSq / newDistSq); // >1 = zoom out, <1 = zoom in
             this.pinchZoom(newMidX, newMidY, scale);
           }
           this.requestRender();
@@ -2077,7 +2072,6 @@ export class Renderer {
     gl.useProgram(this.program);
     gl.uniform1i(this.iconAtlasLocation!, 0);
     gl.uniform1f(this.iconAtlasColsLocation!, columns);
-    gl.uniform1f(this.iconAtlasRowsLocation!, rows);
     gl.uniform1f(this.iconInvAtlasColsLocation!, 1.0 / Math.max(columns, 1));
     gl.uniform1f(this.iconInvAtlasRowsLocation!, 1.0 / Math.max(rows, 1));
     this.requestRender();
@@ -2432,7 +2426,9 @@ export class Renderer {
       gl.bindVertexArray(this.vao);
       this.activeVao = this.vao;
     }
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
+    if (this.nodeCount > 0) {
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.nodeCount);
+    }
 
     this.onRender?.();
   }
