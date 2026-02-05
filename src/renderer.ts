@@ -2115,11 +2115,18 @@ export class Renderer {
       const gridMinY = this.gridMinY;
       const cellW = this.gridCellW;
       const cellH = this.gridCellH;
+      const maxCellIdxX = gridCellsX - 1;
+      const maxCellIdxY = gridCellsY - 1;
 
-      const minCellX = Math.max(0, Math.min(gridCellsX - 1, Math.floor((vpMinX - gridMinX) / cellW)));
-      const minCellY = Math.max(0, Math.min(gridCellsY - 1, Math.floor((vpMinY - gridMinY) / cellH)));
-      const maxCellX = Math.max(0, Math.min(gridCellsX - 1, Math.floor((vpMaxX - gridMinX) / cellW)));
-      const maxCellY = Math.max(0, Math.min(gridCellsY - 1, Math.floor((vpMaxY - gridMinY) / cellH)));
+      // Inline clamp: faster than nested Math.max/Math.min calls
+      let minCellX = Math.floor((vpMinX - gridMinX) / cellW);
+      let minCellY = Math.floor((vpMinY - gridMinY) / cellH);
+      let maxCellX = Math.floor((vpMaxX - gridMinX) / cellW);
+      let maxCellY = Math.floor((vpMaxY - gridMinY) / cellH);
+      if (minCellX < 0) minCellX = 0; else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
+      if (minCellY < 0) minCellY = 0; else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
+      if (maxCellX < 0) maxCellX = 0; else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
+      if (maxCellY < 0) maxCellY = 0; else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
 
       // Clear visited bitset (fill is faster than manual loop)
       const bitsetSize = Math.ceil(total / 8);
