@@ -11,9 +11,15 @@ uniform float u_minRadius;
 uniform float u_maxRadius;
 uniform vec4 u_viewport;
 
+uniform float u_atlasColumns;
+uniform float u_invAtlasCols;
+uniform float u_invAtlasRows;
+
 flat out vec4 v_color;
 out vec2 v_uv;
-flat out float v_iconIndex;
+flat out vec2 v_atlasOrigin;
+flat out vec2 v_atlasScale;
+flat out float v_hasIcon;
 flat out float v_worldRadius;
 
 void main() {
@@ -28,8 +34,17 @@ void main() {
 
   v_color = a_color;
   v_uv = a_quadVertex;
-  v_iconIndex = a_iconIndex;
   v_worldRadius = radius;
+
+  // Icon atlas UV — computed per-instance (flat) instead of per-fragment
+  float cols = max(u_atlasColumns, 1.0);
+  v_hasIcon = step(0.5, a_iconIndex) * step(0.5, u_atlasColumns);
+  float idx = a_iconIndex - 1.0;
+  float col = mod(idx, cols);
+  float row = floor(idx * u_invAtlasCols);
+  v_atlasOrigin = vec2(col * u_invAtlasCols, (row + 1.0) * u_invAtlasRows);
+  v_atlasScale = vec2(u_invAtlasCols, -u_invAtlasRows);
+
   vec2 worldPos = a_position + a_quadVertex * radius;
   gl_Position = vec4(worldPos * u_scale + u_offset, 0.0, 1.0);
 }
@@ -40,14 +55,12 @@ precision mediump float;
 
 flat in vec4 v_color;
 in vec2 v_uv;
-flat in float v_iconIndex;
+flat in vec2 v_atlasOrigin;
+flat in vec2 v_atlasScale;
+flat in float v_hasIcon;
 flat in float v_worldRadius;
 
 uniform sampler2D u_iconAtlas;
-uniform float u_atlasColumns;
-uniform float u_atlasRows;
-uniform float u_invAtlasCols;
-uniform float u_invAtlasRows;
 
 out vec4 outColor;
 
@@ -59,16 +72,10 @@ void main() {
   float a = alpha * v_color.a;
   vec3 rgb = v_color.rgb * a;
 
-  // Icon sampling: branchless via step mask
-  // Hoist max() to avoid redundant calls (compiler may not optimize across divisions)
-  float cols = max(u_atlasColumns, 1.0);
-  float hasIcon = step(0.5, v_iconIndex) * step(0.5, u_atlasColumns);
+  // Icon sampling: atlas UV pre-computed in vertex shader
   vec2 iconUV = v_uv * 0.5 + 0.5;
-  float idx = v_iconIndex - 1.0;
-  float col = mod(idx, cols);
-  float row = floor(idx * u_invAtlasCols);
-  vec2 atlasUV = vec2((col + iconUV.x) * u_invAtlasCols, (row + 1.0 - iconUV.y) * u_invAtlasRows);
-  float iconAlpha = texture(u_iconAtlas, atlasUV).a * hasIcon;
+  vec2 atlasUV = v_atlasOrigin + iconUV * v_atlasScale;
+  float iconAlpha = texture(u_iconAtlas, atlasUV).a * v_hasIcon;
   rgb += iconAlpha * a;
 
   outColor = vec4(rgb, a);
