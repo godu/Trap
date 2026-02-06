@@ -1,4 +1,4 @@
-import { Renderer } from "../src/index";
+import { Renderer, LabelOverlay } from "../src/index";
 import { toRenderNodes, toEdges } from "./graph/convert";
 import type { GraphStep } from "./graph/types";
 import { ICON_SVGS } from "./icons/index";
@@ -20,6 +20,7 @@ const steps: GraphStep[] = [
 
 // Initialize renderer with Step 1
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const canvasContainer = document.getElementById("canvas-container")!;
 const eventInfo = document.getElementById("event-info")!;
 const initialNodes = toRenderNodes(steps[0]);
 const initialEdges = toEdges(steps[0]);
@@ -42,8 +43,17 @@ const renderer = new Renderer({
   onEdgeHoverLeave: (e) => showEvent(e.type, "edge", e.edgeId),
   onBackgroundClick: (e) => showEvent(e.type, "background"),
   onBackgroundDblClick: (e) => showEvent(e.type, "background"),
-  onRender: countRenderFrame,
+  onRender() {
+    countRenderFrame();
+    labels.update(renderer.getNodes(), renderer.getCameraState());
+  },
 });
+
+const labels = new LabelOverlay({
+  container: canvasContainer,
+  labelClass: "graph-label",
+});
+
 renderer.setIcons(ICON_SVGS);
 renderer.render();
 renderer.fitToNodes(0);
