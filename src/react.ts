@@ -1,3 +1,5 @@
+"use client";
+
 import {
   createElement,
   forwardRef,
@@ -11,6 +13,8 @@ import {
 import { Renderer } from "./renderer";
 import { LabelOverlay } from "./labels";
 import type { Node, Edge, NodeEvent, EdgeEvent, BackgroundEvent, CameraState } from "./types";
+
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /** Props for the {@link Graph} component. */
 export interface GraphProps {
@@ -157,8 +161,8 @@ export const Graph = forwardRef(function Graph(props: GraphProps, ref: Ref<Graph
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Data updates — useLayoutEffect so renderer has data before parent RAFs
-  useLayoutEffect(() => {
+  // Data updates — layout effect so renderer has data before parent RAFs
+  useIsomorphicLayoutEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
     renderer.setNodes(props.nodes);
@@ -166,7 +170,7 @@ export const Graph = forwardRef(function Graph(props: GraphProps, ref: Ref<Graph
   }, [props.nodes, props.edges]);
 
   // Fit-to-nodes when `fitKey` changes
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     rendererRef.current?.fitToNodes();
   }, [props.fitKey]);
 

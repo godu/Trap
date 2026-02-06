@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { createElement, createRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { Graph, type GraphRef } from "../../src/index";
+import { Graph, type GraphRef } from "../../src/react";
 import type { Node, Edge } from "../../src/index";
 import { readPixelAt, simulateClick, nextFrame } from "./helpers";
 
