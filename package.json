@@ -1,13 +1,29 @@
 {
-  "name": "webgl2-graph",
+  "name": "@godu/trap",
   "version": "0.1.0",
   "description": "A high-performance WebGL2-based graph visualization library",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    }
+  },
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/godu/Trap.git"
+  },
   "scripts": {
     "build": "tsc",
     "build:demo": "vite build",
