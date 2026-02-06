@@ -10,6 +10,8 @@ export interface Node {
   zIndex?: number;
   /** Icon index (1-based) into the icon atlas. 0 or undefined = no icon. */
   icon?: number;
+  /** Text label displayed near the node. */
+  label?: string;
 }
 
 export interface Edge {
@@ -73,4 +75,17 @@ export interface RendererOptions {
   minScreenRadius?: number;
   /** Maximum node screen radius in CSS pixels (default: 40). */
   maxScreenRadius?: number;
+}
+
+export interface CameraState {
+  centerX: number;
+  centerY: number;
+  halfW: number;
+  halfH: number;
+  clientWidth: number;
+  clientHeight: number;
+  /** Minimum node screen radius in CSS pixels. */
+  minScreenRadius: number;
+  /** Maximum node screen radius in CSS pixels. */
+  maxScreenRadius: number;
 }
