@@ -238,6 +238,9 @@ export class Renderer {
   private nodeMap = new Map<string, Node>();
   private edgeObjects: Edge[] = [];
   private edgeMap = new Map<string, Edge>();
+  private packedEdgeRef: Edge[] = []; // packed-buffer index → Edge object (for grid hit testing)
+  private nodeGeneration = 0; // bumped on setNodes, used to detect color-only edge updates
+  private edgePackedAtNodeGen = -1; // nodeGeneration when edges were last fully packed
 
   // Edge rendering
   private edgeProgram: WebGLProgram;
@@ -1037,6 +1040,8 @@ export class Renderer {
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
     const aabb = this.edgeAABBs!;
+    const refs = this.packedEdgeRef;
+    refs.length = sorted.length;
     let count = 0;
 
     // Track bounding box of all edges for early-out optimization
@@ -1086,16 +1091,40 @@ export class Renderer {
       if (eMaxX > allMaxX) allMaxX = eMaxX;
       if (eMaxY > allMaxY) allMaxY = eMaxY;
 
+      refs[count] = edge;
       count++;
     }
 
+    refs.length = count;
     this.totalEdgeCount = count;
     this.allEdgesMinX = allMinX;
     this.allEdgesMinY = allMinY;
     this.allEdgesMaxX = allMaxX;
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false; // mark buffer as needing upload
+    this.edgePackedAtNodeGen = this.nodeGeneration;
     this.buildEdgeGrid(count);
+  }
+
+  /** Fast path: update only color bytes in packed edge buffer (skip sort/AABB/grid). */
+  private recolorEdgeBuffer(edges: Edge[]): void {
+    const u32 = this.edgeU32;
+    const refs = this.packedEdgeRef;
+    const count = this.totalEdgeCount;
+    if (!u32 || count === 0) return;
+
+    // Build id→edge lookup for new edges
+    const edgeById = this.edgeMap; // already rebuilt in setEdgeObjects before this call
+
+    for (let i = 0; i < count; i++) {
+      const oldEdge = refs[i];
+      const newEdge = edgeById.get(oldEdge.id);
+      if (!newEdge) continue;
+      refs[i] = newEdge; // update ref to new edge object
+      u32[i * 8 + 6] = packPremultiplied(newEdge.r, newEdge.g, newEdge.b, newEdge.a);
+    }
+
+    this.edgeBufferUploaded = false;
   }
 
   private setEdgeObjects(edges: Edge[], animate: boolean): void {
@@ -1110,8 +1139,18 @@ export class Renderer {
     this.edgeMap.clear();
     for (const e of edges) this.edgeMap.set(e.id, e);
 
-    // Pack buffer and compute AABBs; GPU upload deferred to render() for frustum culling
-    this.packEdgeBuffer(edges);
+    // Fast path: if same edge count and node positions haven't changed,
+    // only update color bytes in packed buffer (skip sort/AABB/grid rebuild)
+    const colorOnly = !animate &&
+      edges.length === this.totalEdgeCount &&
+      this.edgePackedAtNodeGen === this.nodeGeneration &&
+      this.edgeF32 !== null;
+
+    if (colorOnly) {
+      this.recolorEdgeBuffer(edges);
+    } else {
+      this.packEdgeBuffer(edges);
+    }
 
     // Reset motion cache when data changes - ensures first render does proper culling
     this.motionCacheValid = false;
@@ -1179,6 +1218,7 @@ export class Renderer {
 
     this.nodes = nodes;
     this.nodeCount = nodes.length;
+    this.nodeGeneration++;
     this.rebuildNodeMap(nodes);
     this.uploadNodeData(this.gl, nodes);
 
@@ -1352,6 +1392,8 @@ export class Renderer {
     const f32 = this.edgeF32!;
     const u32 = this.edgeU32!;
     const aabb = this.edgeAABBs!;
+    const refs = this.packedEdgeRef;
+    refs.length = target.length;
     let count = 0;
 
     // Track bounding box of all edges for early-out optimization
@@ -1414,9 +1456,11 @@ export class Renderer {
       if (eMaxX > allMaxX) allMaxX = eMaxX;
       if (eMaxY > allMaxY) allMaxY = eMaxY;
 
+      refs[count] = edge;
       count++;
     }
 
+    refs.length = count;
     this.totalEdgeCount = count;
     this.allEdgesMinX = allMinX;
     this.allEdgesMinY = allMinY;
@@ -1521,6 +1565,90 @@ export class Renderer {
     const worldPerPx = (this.halfW * 2) / clientW;
     const baseTol = worldPerPx * 5;
 
+    const grid = this.edgeGrid;
+    const gridCounts = this.edgeGridCounts;
+    const visited = this.visitedEdges;
+    const aabb = this.edgeAABBs;
+    const f32 = this.edgeF32;
+    const refs = this.packedEdgeRef;
+    const total = this.totalEdgeCount;
+
+    // Use spatial grid when available
+    if (grid && gridCounts && visited && aabb && f32 && total > 0) {
+      const gridCellsX = this.gridCellsX;
+      const invCellW = this.gridInvCellW;
+      const invCellH = this.gridInvCellH;
+      const gridMinX = this.gridMinX;
+      const gridMinY = this.gridMinY;
+      const maxCellIdxX = gridCellsX - 1;
+      const maxCellIdxY = this.gridCellsY - 1;
+
+      // Expand query point by max tolerance to find candidate cells
+      const maxTol = baseTol + 0.5; // baseTol + conservative half-width
+      let minCellX = Math.floor((worldX - maxTol - gridMinX) * invCellW);
+      let minCellY = Math.floor((worldY - maxTol - gridMinY) * invCellH);
+      let maxCellX = Math.floor((worldX + maxTol - gridMinX) * invCellW);
+      let maxCellY = Math.floor((worldY + maxTol - gridMinY) * invCellH);
+      if (minCellX < 0) minCellX = 0; else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
+      if (minCellY < 0) minCellY = 0; else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
+      if (maxCellX < 0) maxCellX = 0; else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
+      if (maxCellY < 0) maxCellY = 0; else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
+
+      // Clear visited bitset
+      const bitsetSize = Math.ceil(total / 8);
+      visited.fill(0, 0, bitsetSize);
+
+      let closest: Edge | null = null;
+      let closestDistSq = Infinity;
+
+      for (let cy = minCellY; cy <= maxCellY; cy++) {
+        for (let cx = minCellX; cx <= maxCellX; cx++) {
+          const cellIdx = cy * gridCellsX + cx;
+          const cell = grid[cellIdx];
+          const count = gridCounts[cellIdx];
+
+          for (let j = 0; j < count; j++) {
+            const i = cell[j];
+            const byteIdx = i >> 3;
+            const bitMask = 1 << (i & 7);
+            if (visited[byteIdx] & bitMask) continue;
+            visited[byteIdx] |= bitMask;
+
+            // AABB test with tolerance
+            const aabbIdx = i * 4;
+            if (worldX < aabb[aabbIdx] - baseTol || worldX > aabb[aabbIdx + 2] + baseTol ||
+                worldY < aabb[aabbIdx + 1] - baseTol || worldY > aabb[aabbIdx + 3] + baseTol) continue;
+
+            // Read src/tgt positions from packed buffer
+            const slot = i * 8;
+            const srcX = f32[slot];
+            const srcY = f32[slot + 1];
+            const tgtX = f32[slot + 2];
+            const tgtY = f32[slot + 3];
+            const width = f32[slot + 7];
+
+            const edgeTol = baseTol + width * 0.5;
+
+            const dx = tgtX - srcX;
+            const dy = tgtY - srcY;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq < 0.00000001) continue;
+            const ctrlX = (srcX + tgtX) * 0.5 - dy * CURVATURE;
+            const ctrlY = (srcY + tgtY) * 0.5 + dx * CURVATURE;
+
+            const dSq = distSqToBezier(worldX, worldY, srcX, srcY, ctrlX, ctrlY, tgtX, tgtY);
+            if (dSq < edgeTol * edgeTol && dSq < closestDistSq) {
+              closestDistSq = dSq;
+              closest = refs[i];
+            }
+          }
+        }
+      }
+
+      return closest;
+    }
+
+    // Fallback: linear scan (no grid available)
     let closest: Edge | null = null;
     let closestDistSq = Infinity;
 
@@ -1530,26 +1658,22 @@ export class Renderer {
       const tgt = this.nodeMap.get(edge.target);
       if (!src || !tgt) continue;
 
-      // Per-edge tolerance = 5px + half the rendered edge width
       const halfW = (edge.width ?? 1.0) * 0.5;
       const edgeTol = baseTol + halfW;
 
-      // Compute Bezier control point (simplified: len cancels in (-dy/len)*len*CURVATURE)
       const dx = tgt.x - src.x;
       const dy = tgt.y - src.y;
       const lenSq = dx * dx + dy * dy;
-      if (lenSq < 0.00000001) continue; // skip degenerate edges
+      if (lenSq < 0.00000001) continue;
       const ctrlX = (src.x + tgt.x) * 0.5 - dy * CURVATURE;
       const ctrlY = (src.y + tgt.y) * 0.5 + dx * CURVATURE;
 
-      // Tight bbox — Bezier convex hull + edge width + pixel tolerance
       const minX = Math.min(src.x, tgt.x, ctrlX) - edgeTol;
       const maxX = Math.max(src.x, tgt.x, ctrlX) + edgeTol;
       const minY = Math.min(src.y, tgt.y, ctrlY) - edgeTol;
       const maxY = Math.max(src.y, tgt.y, ctrlY) + edgeTol;
       if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue;
 
-      // Analytical closest-point distance to center line
       const dSq = distSqToBezier(worldX, worldY, src.x, src.y, ctrlX, ctrlY, tgt.x, tgt.y);
       if (dSq < edgeTol * edgeTol && dSq < closestDistSq) {
         closestDistSq = dSq;
