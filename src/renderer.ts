@@ -239,8 +239,7 @@ export class Renderer {
   private edgeObjects: Edge[] = [];
   private edgeMap = new Map<string, Edge>();
   private packedEdgeRef: Edge[] = []; // packed-buffer index → Edge object (for grid hit testing)
-  private nodeGeneration = 0; // bumped on setNodes, used to detect color-only edge updates
-  private edgePackedAtNodeGen = -1; // nodeGeneration when edges were last fully packed
+  private nodePositionsChanged = false; // set true by setNodes when positions change, cleared by packEdgeBuffer
 
   // Edge rendering
   private edgeProgram: WebGLProgram;
@@ -1102,7 +1101,7 @@ export class Renderer {
     this.allEdgesMaxX = allMaxX;
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false; // mark buffer as needing upload
-    this.edgePackedAtNodeGen = this.nodeGeneration;
+    this.nodePositionsChanged = false;
     this.buildEdgeGrid(count);
   }
 
@@ -1127,8 +1126,16 @@ export class Renderer {
     this.edgeBufferUploaded = false;
   }
 
-  private setEdgeObjects(edges: Edge[], animate: boolean): void {
-    if (animate && this.dataAnimDuration > 0 && this.edgeObjects.length > 0) {
+  /** @returns true if color-only fast path was taken */
+  private setEdgeObjects(edges: Edge[], animate: boolean): boolean {
+    // Fast path: if same edge count and node positions haven't changed,
+    // only update color bytes in packed buffer (skip sort/AABB/grid rebuild)
+    const colorOnly =
+      edges.length === this.totalEdgeCount &&
+      !this.nodePositionsChanged &&
+      this.edgeF32 !== null;
+
+    if (!colorOnly && animate && this.dataAnimDuration > 0 && this.edgeObjects.length > 0) {
       this.oldEdges = this.edgeObjects;
       this.oldEdgeMap.clear();
       for (const e of this.oldEdges) this.oldEdgeMap.set(e.id, e);
@@ -1136,15 +1143,9 @@ export class Renderer {
     }
 
     this.edgeObjects = edges;
+    // Rebuild edge ID→object map (needed for hit test result lookup)
     this.edgeMap.clear();
     for (const e of edges) this.edgeMap.set(e.id, e);
-
-    // Fast path: if same edge count and node positions haven't changed,
-    // only update color bytes in packed buffer (skip sort/AABB/grid rebuild)
-    const colorOnly = !animate &&
-      edges.length === this.totalEdgeCount &&
-      this.edgePackedAtNodeGen === this.nodeGeneration &&
-      this.edgeF32 !== null;
 
     if (colorOnly) {
       this.recolorEdgeBuffer(edges);
@@ -1157,6 +1158,7 @@ export class Renderer {
     this.motionEdgeCount = 0;
     this.edgeBufferUploaded = false;
     this.inMotion = false;
+    return colorOnly;
   }
 
   /** Set edges using Edge object array. Renderer resolves node positions. */
@@ -1166,8 +1168,9 @@ export class Renderer {
   setEdges(edgesOrBuffer: Edge[] | ArrayBufferView, count?: number): void {
     if (Array.isArray(edgesOrBuffer)) {
       const shouldAnimate = this.dataAnimDuration > 0 && this.edgeObjects.length > 0;
-      this.setEdgeObjects(edgesOrBuffer, shouldAnimate);
-      if (shouldAnimate) {
+      const colorOnly = this.setEdgeObjects(edgesOrBuffer, shouldAnimate);
+      // Skip animation restart for color-only changes (no position interpolation needed)
+      if (shouldAnimate && !colorOnly) {
         this.startDataAnimation();
       }
       this.requestRender();
@@ -1199,6 +1202,20 @@ export class Renderer {
   }
 
   setNodes(nodes: Node[]): void {
+    // Detect whether node positions changed (affects edge packing and animation)
+    const oldNodes = this.nodes;
+    let posChanged = nodes.length !== oldNodes.length;
+    if (!posChanged) {
+      for (let i = 0; i < nodes.length; i++) {
+        if (nodes[i].x !== oldNodes[i].x || nodes[i].y !== oldNodes[i].y ||
+            nodes[i].radius !== oldNodes[i].radius || nodes[i].id !== oldNodes[i].id) {
+          posChanged = true;
+          break;
+        }
+      }
+    }
+    if (posChanged) this.nodePositionsChanged = true;
+
     const shouldAnimate = this.dataAnimDuration > 0 && this.nodes.length > 0;
 
     if (shouldAnimate) {
@@ -1207,8 +1224,8 @@ export class Renderer {
       for (const n of this.oldNodes) this.oldNodeMap.set(n.id, n);
       this.targetNodes = nodes;
 
-      // Snapshot edge state for animation too
-      if (this.edgeObjects.length > 0) {
+      // Snapshot edge state for animation only when positions changed
+      if (posChanged && this.edgeObjects.length > 0) {
         this.oldEdges = this.edgeObjects;
         this.oldEdgeMap.clear();
         for (const e of this.oldEdges) this.oldEdgeMap.set(e.id, e);
@@ -1218,14 +1235,13 @@ export class Renderer {
 
     this.nodes = nodes;
     this.nodeCount = nodes.length;
-    this.nodeGeneration++;
     this.rebuildNodeMap(nodes);
     this.uploadNodeData(this.gl, nodes);
 
     // Re-pack edges if we have object edges (positions changed).
     // Skip when animating — interpolateEdges will repack every frame.
     // GPU upload deferred to render() for frustum culling.
-    if (this.edgeObjects.length > 0 && !shouldAnimate) {
+    if (posChanged && this.edgeObjects.length > 0 && !shouldAnimate) {
       this.packEdgeBuffer(this.edgeObjects);
     }
 
