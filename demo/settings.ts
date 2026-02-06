@@ -1,16 +1,19 @@
 export const TYPE_COLORS: Record<string, [number, number, number]> = {
-  "aws:cloudformation:stack": [0.98, 0.51, 0.25],
-  "aws:dynamodb:table": [0.29, 0.47, 0.82],
-  "aws:ec2:instance": [0.95, 0.77, 0.06],
-  "aws:ecs:task-definition": [0.95, 0.49, 0.13],
-  "aws:iam:oidc-provider": [0.86, 0.21, 0.27],
-  "aws:iam:role": [0.86, 0.21, 0.27],
-  "aws:iam:saml-provider": [0.86, 0.21, 0.27],
-  "aws:iam:user": [0.72, 0.15, 0.22],
-  "aws:kms:key": [0.62, 0.31, 0.71],
-  "aws:lambda:function": [0.95, 0.61, 0.07],
-  "aws:s3:bucket": [0.22, 0.66, 0.36],
-  "aws:sqs:queue": [0.95, 0.35, 0.53],
+  // Principal (identity) — #ba5312
+  "aws:iam:oidc-provider": [0.73, 0.33, 0.07],
+  "aws:iam:role": [0.73, 0.33, 0.07],
+  "aws:iam:saml-provider": [0.73, 0.33, 0.07],
+  "aws:iam:user": [0.73, 0.33, 0.07],
+  // Compute — #4a90e2
+  "aws:cloudformation:stack": [0.29, 0.56, 0.89],
+  "aws:ec2:instance": [0.29, 0.56, 0.89],
+  "aws:ecs:task-definition": [0.29, 0.56, 0.89],
+  "aws:lambda:function": [0.29, 0.56, 0.89],
+  // Database (data) — #2d9c4f
+  "aws:dynamodb:table": [0.18, 0.61, 0.31],
+  "aws:kms:key": [0.18, 0.61, 0.31],
+  "aws:s3:bucket": [0.18, 0.61, 0.31],
+  "aws:sqs:queue": [0.18, 0.61, 0.31],
 };
 
 export const DEFAULT_NODE_COLOR: [number, number, number] = [0.6, 0.6, 0.6];

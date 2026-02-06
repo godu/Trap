@@ -747,6 +747,15 @@ export class Renderer {
   }
 
   private initCamera(): void {
+    if (this.nodes.length === 0) {
+      this.centerX = 0;
+      this.centerY = 0;
+      const aspect = this.canvas.width / (this.canvas.height || 1);
+      this.halfH = 100;
+      this.halfW = this.halfH * aspect;
+      this.projectionDirty = true;
+      return;
+    }
     const bounds = computeBounds(this.nodes);
     const view = computeFitView(bounds, this.canvas.width, this.canvas.height);
     this.centerX = view.centerX;
@@ -1418,6 +1427,7 @@ export class Renderer {
         d.x = ix;
         d.y = iy;
         d.s = ir;
+        d.l = node.l;
       } else {
         display[i] = {
           id: node.id,

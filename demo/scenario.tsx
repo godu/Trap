@@ -1,11 +1,5 @@
 import { createRoot } from "react-dom/client";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Graph } from "../src/react";
 import type { GraphRef } from "../src/react";
 import type { Node, Edge } from "../src/types";
@@ -71,7 +65,8 @@ function toEdges(edgeData: EdgeData[], resources: Resource[]): Edge[] {
   const edges: Edge[] = [];
   for (const e of edgeData) {
     if (!posMap.has(e.PrincipalArn) || !posMap.has(e.ResourceArn)) continue;
-    const [r, g, b, a] = EDGE_TYPE_COLORS[e.HasPrivileges] ?? DEFAULT_EDGE_COLOR;
+    const [r, g, b, a] =
+      EDGE_TYPE_COLORS[e.HasPrivileges] ?? DEFAULT_EDGE_COLOR;
     edges.push({
       id: `${e.PrincipalArn}->${e.ResourceArn}`,
       src: e.PrincipalArn,
@@ -148,13 +143,15 @@ function App() {
   const [dataset, setDataset] = useState("small");
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const [fitKey, setFitKey] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
-  const [highlightedEdgeId, setHighlightedEdgeId] = useState<string | null>(null);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(
+    null,
+  );
+  const [highlightedEdgeId, setHighlightedEdgeId] = useState<string | null>(
+    null,
+  );
   const [eventText, setEventText] = useState("");
-
-  // Track whether this is the first load for instant fit
-  const isFirstLoad = useRef(true);
 
   // Load dataset
   useEffect(() => {
@@ -162,18 +159,12 @@ function App() {
     setLoading(true);
     loadRaw(dataset).then(([resources, edgeData]) => {
       if (cancelled) return;
-      const n = toNodes(resources);
-      const e = toEdges(edgeData, resources);
-      const firstLoad = isFirstLoad.current;
-      isFirstLoad.current = false;
-      setNodes(n);
-      setEdges(e);
+      setNodes(toNodes(resources));
+      setEdges(toEdges(edgeData, resources));
+      setFitKey((k) => k + 1);
       setHighlightedNodeId(null);
       setHighlightedEdgeId(null);
       setLoading(false);
-      requestAnimationFrame(() => {
-        graphRef.current?.fitToNodes(firstLoad ? 0 : undefined);
-      });
     });
     return () => {
       cancelled = true;
@@ -215,7 +206,8 @@ function App() {
 
   const displayEdges = useMemo(() => {
     if (highlightedNodeId) {
-      const connectedEdges = edgesByNode.get(highlightedNodeId) ?? new Set<string>();
+      const connectedEdges =
+        edgesByNode.get(highlightedNodeId) ?? new Set<string>();
       return edges.map((e) => ({
         ...e,
         a: connectedEdges.has(e.id) ? e.a : DIM_A,
@@ -266,6 +258,7 @@ function App() {
           ref={graphRef}
           nodes={displayNodes}
           edges={displayEdges}
+          fitKey={fitKey}
           animationDuration={300}
           icons={ICON_SVGS}
           labelClass="graph-label"

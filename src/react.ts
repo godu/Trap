@@ -23,6 +23,8 @@ export interface GraphProps {
   maxScreenRadius?: number;
   icons?: string[];
   iconCellSize?: number;
+  /** When this value changes, the camera fits to all nodes (animated). */
+  fitKey?: string | number;
 
   // Labels
   labelClass?: string;
@@ -162,6 +164,11 @@ export const Graph = forwardRef(function Graph(props: GraphProps, ref: Ref<Graph
     renderer.setNodes(props.nodes);
     if (props.edges) renderer.setEdges(props.edges);
   }, [props.nodes, props.edges]);
+
+  // Fit-to-nodes when `fitKey` changes
+  useLayoutEffect(() => {
+    rendererRef.current?.fitToNodes();
+  }, [props.fitKey]);
 
   // Curvature
   useEffect(() => {
