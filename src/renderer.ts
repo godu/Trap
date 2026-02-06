@@ -1424,7 +1424,16 @@ export class Renderer {
       f32[fi + 4] = node.i;
       // Build display node with interpolated position for label overlay
       const d = display[i];
-      if (d && d.id === node.id) {
+      if (d) {
+        if (d.id !== node.id) {
+          d.id = node.id;
+          d.r = node.r;
+          d.g = node.g;
+          d.b = node.b;
+          d.a = node.a;
+          d.z = node.z;
+          d.i = node.i;
+        }
         d.x = ix;
         d.y = iy;
         d.s = ir;
@@ -1575,7 +1584,8 @@ export class Renderer {
     this.allEdgesMaxY = allMaxY;
     this.edgeBufferUploaded = false;
     this.motionCacheValid = false; // Force re-upload of interpolated edge positions
-    this.buildEdgeGrid(count);
+    // Grid is stale during animation — nullify so cullAndUploadEdges uses fast path
+    this.edgeGrid = null;
     // GPU upload deferred to render() which will cull and upload only visible edges
   }
 
@@ -2585,6 +2595,21 @@ export class Renderer {
       return this.motionEdgeCount;
     }
 
+    // Data animation fast path: grid is stale, upload full buffer
+    // Vertex shader handles per-edge culling via viewport frustum test
+    if (this.dataAnimId !== null) {
+      if (!this.edgeBufferUploaded) {
+        const gl = this.gl;
+        const uploadSize = total * EDGE_STRIDE;
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.edgeInstanceBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this.edgeBufU8.subarray(0, uploadSize), gl.DYNAMIC_DRAW);
+        this.edgeGpuBytes = uploadSize;
+        this.edgeBufferUploaded = true;
+      }
+      this.visibleEdgeCount = total;
+      return total;
+    }
+
     // Fast path: if viewport contains ALL edges, upload full buffer
     if (
       vpMinX <= this.allEdgesMinX &&
@@ -2946,5 +2971,9 @@ export class Renderer {
     }
 
     this.resizeObserver.disconnect();
+
+    // Eagerly release GPU resources — context may persist until canvas is GC'd
+    const ext = gl.getExtension("WEBGL_lose_context");
+    if (ext) ext.loseContext();
   }
 }

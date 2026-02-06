@@ -68,11 +68,12 @@ void main() {
   float a = alpha * v_color.a;
   vec3 rgb = v_color.rgb * a;
 
-  // Icon sampling: atlas UV pre-computed in vertex shader
-  vec2 iconUV = v_uv * 0.5 + 0.5;
-  vec2 atlasUV = v_atlasOrigin + iconUV * v_atlasScale;
-  float iconAlpha = texture(u_iconAtlas, atlasUV).a * v_hasIcon;
-  rgb += iconAlpha * a;
+  // Icon sampling: branch skips texture fetch for non-icon nodes (coherent)
+  if (v_hasIcon > 0.5) {
+    vec2 iconUV = v_uv * 0.5 + 0.5;
+    vec2 atlasUV = v_atlasOrigin + iconUV * v_atlasScale;
+    rgb += texture(u_iconAtlas, atlasUV).a * a;
+  }
 
   outColor = vec4(rgb, a);
 }
