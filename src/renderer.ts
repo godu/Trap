@@ -8,10 +8,7 @@ import { buildIconAtlas } from "./atlas";
  * Compile all shaders first, link all programs, then check status once.
  * Only queries compile status on link failure (for diagnostics).
  */
-function createPrograms(
-  gl: WebGL2RenderingContext,
-  sources: [string, string][],
-): WebGLProgram[] {
+function createPrograms(gl: WebGL2RenderingContext, sources: [string, string][]): WebGLProgram[] {
   const shaders: WebGLShader[] = [];
   const programs: WebGLProgram[] = [];
 
@@ -394,9 +391,28 @@ export class Renderer {
   private currentCursor = "";
 
   // Pre-allocated event objects (reused to avoid GC pressure on mousemove)
-  private readonly nodeEventPool: NodeEvent = { type: "", nodeId: "", node: null!, worldX: 0, worldY: 0, originalEvent: null! };
-  private readonly edgeEventPool: EdgeEvent = { type: "", edgeId: "", edge: null!, worldX: 0, worldY: 0, originalEvent: null! };
-  private readonly bgEventPool: BackgroundEvent = { type: "", worldX: 0, worldY: 0, originalEvent: null! };
+  private readonly nodeEventPool: NodeEvent = {
+    type: "",
+    nodeId: "",
+    node: null!,
+    worldX: 0,
+    worldY: 0,
+    originalEvent: null!,
+  };
+  private readonly edgeEventPool: EdgeEvent = {
+    type: "",
+    edgeId: "",
+    edge: null!,
+    worldX: 0,
+    worldY: 0,
+    originalEvent: null!,
+  };
+  private readonly bgEventPool: BackgroundEvent = {
+    type: "",
+    worldX: 0,
+    worldY: 0,
+    originalEvent: null!,
+  };
 
   // Cached sorted arrays for animation (sort once, reuse every frame)
   private sortedTargetNodes: Node[] | null = null;
@@ -523,7 +539,6 @@ export class Renderer {
 
     this.minScreenRadius = options.minScreenRadius ?? 2;
     this.maxScreenRadius = options.maxScreenRadius ?? 40;
-
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,
@@ -693,8 +708,10 @@ export class Renderer {
     for (let i = 0; i < len; i++) {
       let cx = Math.floor((nodes[i].x - minX) * this.nodeGridInvCellW);
       let cy = Math.floor((nodes[i].y - minY) * this.nodeGridInvCellH);
-      if (cx < 0) cx = 0; else if (cx > maxCellIdx) cx = maxCellIdx;
-      if (cy < 0) cy = 0; else if (cy > maxCellIdx) cy = maxCellIdx;
+      if (cx < 0) cx = 0;
+      else if (cx > maxCellIdx) cx = maxCellIdx;
+      if (cy < 0) cy = 0;
+      else if (cy > maxCellIdx) cy = maxCellIdx;
       const cellIdx = cy * gridSize + cx;
       const count = counts[cellIdx];
       let cell = grid[cellIdx];
@@ -1008,10 +1025,14 @@ export class Renderer {
       let cy0 = Math.floor((eMinY - gridMinY) * invCellH);
       let cx1 = Math.floor((eMaxX - gridMinX) * invCellW);
       let cy1 = Math.floor((eMaxY - gridMinY) * invCellH);
-      if (cx0 < 0) cx0 = 0; else if (cx0 > maxCellIdxX) cx0 = maxCellIdxX;
-      if (cy0 < 0) cy0 = 0; else if (cy0 > maxCellIdxY) cy0 = maxCellIdxY;
-      if (cx1 < 0) cx1 = 0; else if (cx1 > maxCellIdxX) cx1 = maxCellIdxX;
-      if (cy1 < 0) cy1 = 0; else if (cy1 > maxCellIdxY) cy1 = maxCellIdxY;
+      if (cx0 < 0) cx0 = 0;
+      else if (cx0 > maxCellIdxX) cx0 = maxCellIdxX;
+      if (cy0 < 0) cy0 = 0;
+      else if (cy0 > maxCellIdxY) cy0 = maxCellIdxY;
+      if (cx1 < 0) cx1 = 0;
+      else if (cx1 > maxCellIdxX) cx1 = maxCellIdxX;
+      if (cy1 < 0) cy1 = 0;
+      else if (cy1 > maxCellIdxY) cy1 = maxCellIdxY;
 
       for (let cy = cy0; cy <= cy1; cy++) {
         for (let cx = cx0; cx <= cx1; cx++) {
@@ -1136,9 +1157,7 @@ export class Renderer {
     // Fast path: if same edge count and node positions haven't changed,
     // only update color bytes in packed buffer (skip sort/AABB/grid rebuild)
     const colorOnly =
-      edges.length === this.totalEdgeCount &&
-      !this.nodePositionsChanged &&
-      this.edgeF32 !== null;
+      edges.length === this.totalEdgeCount && !this.nodePositionsChanged && this.edgeF32 !== null;
 
     if (!colorOnly && animate && this.dataAnimDuration > 0 && this.edgeObjects.length > 0) {
       this.oldEdges = this.edgeObjects;
@@ -1212,8 +1231,12 @@ export class Renderer {
     let posChanged = nodes.length !== oldNodes.length;
     if (!posChanged) {
       for (let i = 0; i < nodes.length; i++) {
-        if (nodes[i].x !== oldNodes[i].x || nodes[i].y !== oldNodes[i].y ||
-            nodes[i].radius !== oldNodes[i].radius || nodes[i].id !== oldNodes[i].id) {
+        if (
+          nodes[i].x !== oldNodes[i].x ||
+          nodes[i].y !== oldNodes[i].y ||
+          nodes[i].radius !== oldNodes[i].radius ||
+          nodes[i].id !== oldNodes[i].id
+        ) {
           posChanged = true;
           break;
         }
@@ -1541,8 +1564,10 @@ export class Renderer {
 
     let cx = Math.floor((worldX - this.nodeGridMinX) * this.nodeGridInvCellW);
     let cy = Math.floor((worldY - this.nodeGridMinY) * this.nodeGridInvCellH);
-    if (cx < 0) cx = 0; else if (cx > maxCellIdxX) cx = maxCellIdxX;
-    if (cy < 0) cy = 0; else if (cy > maxCellIdxY) cy = maxCellIdxY;
+    if (cx < 0) cx = 0;
+    else if (cx > maxCellIdxX) cx = maxCellIdxX;
+    if (cy < 0) cy = 0;
+    else if (cy > maxCellIdxY) cy = maxCellIdxY;
 
     let sx = cx - cellSearchX;
     let sy = cy - cellSearchY;
@@ -1610,10 +1635,14 @@ export class Renderer {
       let minCellY = Math.floor((worldY - maxTol - gridMinY) * invCellH);
       let maxCellX = Math.floor((worldX + maxTol - gridMinX) * invCellW);
       let maxCellY = Math.floor((worldY + maxTol - gridMinY) * invCellH);
-      if (minCellX < 0) minCellX = 0; else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
-      if (minCellY < 0) minCellY = 0; else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
-      if (maxCellX < 0) maxCellX = 0; else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
-      if (maxCellY < 0) maxCellY = 0; else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
+      if (minCellX < 0) minCellX = 0;
+      else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
+      if (minCellY < 0) minCellY = 0;
+      else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
+      if (maxCellX < 0) maxCellX = 0;
+      else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
+      if (maxCellY < 0) maxCellY = 0;
+      else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
 
       // Clear visited bitset
       const bitsetSize = Math.ceil(total / 8);
@@ -1637,8 +1666,13 @@ export class Renderer {
 
             // AABB test with tolerance
             const aabbIdx = i * 4;
-            if (worldX < aabb[aabbIdx] - baseTol || worldX > aabb[aabbIdx + 2] + baseTol ||
-                worldY < aabb[aabbIdx + 1] - baseTol || worldY > aabb[aabbIdx + 3] + baseTol) continue;
+            if (
+              worldX < aabb[aabbIdx] - baseTol ||
+              worldX > aabb[aabbIdx + 2] + baseTol ||
+              worldY < aabb[aabbIdx + 1] - baseTol ||
+              worldY > aabb[aabbIdx + 3] + baseTol
+            )
+              continue;
 
             // Read src/tgt positions from packed buffer
             const slot = i * 8;
@@ -1864,7 +1898,10 @@ export class Renderer {
           const ddx = cx - this.lastTapX;
           const ddy = cy - this.lastTapY;
 
-          if (dt < DOUBLE_TAP_TIMEOUT && ddx * ddx + ddy * ddy < CLICK_THRESHOLD * CLICK_THRESHOLD) {
+          if (
+            dt < DOUBLE_TAP_TIMEOUT &&
+            ddx * ddx + ddy * ddy < CLICK_THRESHOLD * CLICK_THRESHOLD
+          ) {
             // Double tap
             clearTimeout(this.tapTimeoutId);
             this.lastTapTime = 0;
@@ -1893,32 +1930,54 @@ export class Renderer {
   // Emit pooled events (mutate-then-call avoids allocating per event)
   private emitNodeEvent(
     cb: (e: NodeEvent) => void,
-    type: string, nodeId: string, node: Node,
-    worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+    type: string,
+    nodeId: string,
+    node: Node,
+    worldX: number,
+    worldY: number,
+    originalEvent: MouseEvent | TouchEvent,
   ): void {
     const ev = this.nodeEventPool;
-    ev.type = type; ev.nodeId = nodeId; ev.node = node;
-    ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    ev.type = type;
+    ev.nodeId = nodeId;
+    ev.node = node;
+    ev.worldX = worldX;
+    ev.worldY = worldY;
+    ev.originalEvent = originalEvent;
     cb(ev);
   }
 
   private emitEdgeEvent(
     cb: (e: EdgeEvent) => void,
-    type: string, edgeId: string, edge: Edge,
-    worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+    type: string,
+    edgeId: string,
+    edge: Edge,
+    worldX: number,
+    worldY: number,
+    originalEvent: MouseEvent | TouchEvent,
   ): void {
     const ev = this.edgeEventPool;
-    ev.type = type; ev.edgeId = edgeId; ev.edge = edge;
-    ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    ev.type = type;
+    ev.edgeId = edgeId;
+    ev.edge = edge;
+    ev.worldX = worldX;
+    ev.worldY = worldY;
+    ev.originalEvent = originalEvent;
     cb(ev);
   }
 
   private emitBgEvent(
     cb: (e: BackgroundEvent) => void,
-    type: string, worldX: number, worldY: number, originalEvent: MouseEvent | TouchEvent,
+    type: string,
+    worldX: number,
+    worldY: number,
+    originalEvent: MouseEvent | TouchEvent,
   ): void {
     const ev = this.bgEventPool;
-    ev.type = type; ev.worldX = worldX; ev.worldY = worldY; ev.originalEvent = originalEvent;
+    ev.type = type;
+    ev.worldX = worldX;
+    ev.worldY = worldY;
+    ev.originalEvent = originalEvent;
     cb(ev);
   }
 
@@ -1959,13 +2018,29 @@ export class Renderer {
 
     const node = this.hitTestNode(worldX, worldY);
     if (node && this.onNodeDblClick) {
-      this.emitNodeEvent(this.onNodeDblClick, "dblclick", node.id, node, worldX, worldY, originalEvent);
+      this.emitNodeEvent(
+        this.onNodeDblClick,
+        "dblclick",
+        node.id,
+        node,
+        worldX,
+        worldY,
+        originalEvent,
+      );
       return;
     }
 
     const edge = this.hitTestEdge(worldX, worldY);
     if (edge && this.onEdgeDblClick) {
-      this.emitEdgeEvent(this.onEdgeDblClick, "dblclick", edge.id, edge, worldX, worldY, originalEvent);
+      this.emitEdgeEvent(
+        this.onEdgeDblClick,
+        "dblclick",
+        edge.id,
+        edge,
+        worldX,
+        worldY,
+        originalEvent,
+      );
       return;
     }
 
@@ -1995,7 +2070,15 @@ export class Renderer {
       if (this.hoveredNodeId && this.onNodeHoverLeave) {
         const oldNode = this.nodeMap.get(this.hoveredNodeId);
         if (oldNode) {
-          this.emitNodeEvent(this.onNodeHoverLeave, "hoverleave", this.hoveredNodeId, oldNode, worldX, worldY, e);
+          this.emitNodeEvent(
+            this.onNodeHoverLeave,
+            "hoverleave",
+            this.hoveredNodeId,
+            oldNode,
+            worldX,
+            worldY,
+            e,
+          );
         }
       }
       if (nodeId && node && this.onNodeHoverEnter) {
@@ -2013,7 +2096,15 @@ export class Renderer {
         if (this.hoveredEdgeId && this.onEdgeHoverLeave) {
           const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
           if (oldEdge) {
-            this.emitEdgeEvent(this.onEdgeHoverLeave, "hoverleave", this.hoveredEdgeId, oldEdge, worldX, worldY, e);
+            this.emitEdgeEvent(
+              this.onEdgeHoverLeave,
+              "hoverleave",
+              this.hoveredEdgeId,
+              oldEdge,
+              worldX,
+              worldY,
+              e,
+            );
           }
         }
         if (edgeId && edge && this.onEdgeHoverEnter) {
@@ -2029,7 +2120,15 @@ export class Renderer {
         if (this.onEdgeHoverLeave) {
           const oldEdge = this.edgeMap.get(this.hoveredEdgeId);
           if (oldEdge) {
-            this.emitEdgeEvent(this.onEdgeHoverLeave, "hoverleave", this.hoveredEdgeId, oldEdge, worldX, worldY, e);
+            this.emitEdgeEvent(
+              this.onEdgeHoverLeave,
+              "hoverleave",
+              this.hoveredEdgeId,
+              oldEdge,
+              worldX,
+              worldY,
+              e,
+            );
           }
         }
         this.hoveredEdgeId = null;
@@ -2216,7 +2315,6 @@ export class Renderer {
     this.requestRender();
   }
 
-
   fitToNodes(duration = 300): void {
     this.resize();
     const bounds = computeBounds(this.nodes);
@@ -2297,7 +2395,6 @@ export class Renderer {
       this.canvas.height = displayHeight;
     }
   }
-
 
   private updateProjection(): void {
     if (!this.projectionDirty) return;
@@ -2458,10 +2555,14 @@ export class Renderer {
       let minCellY = Math.floor((vpMinY - gridMinY) * invCellH);
       let maxCellX = Math.floor((vpMaxX - gridMinX) * invCellW);
       let maxCellY = Math.floor((vpMaxY - gridMinY) * invCellH);
-      if (minCellX < 0) minCellX = 0; else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
-      if (minCellY < 0) minCellY = 0; else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
-      if (maxCellX < 0) maxCellX = 0; else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
-      if (maxCellY < 0) maxCellY = 0; else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
+      if (minCellX < 0) minCellX = 0;
+      else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
+      if (minCellY < 0) minCellY = 0;
+      else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
+      if (maxCellX < 0) maxCellX = 0;
+      else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
+      if (maxCellY < 0) maxCellY = 0;
+      else if (maxCellY > maxCellIdxY) maxCellY = maxCellIdxY;
 
       // Clear visited bitset (fill is faster than manual loop)
       const bitsetSize = Math.ceil(total / 8);
@@ -2484,7 +2585,11 @@ export class Renderer {
 
           for (let j = 0; j < count; j++) {
             // Check time budget every 512 edges (skip when not in motion)
-            if (budgeted && (edgesProcessed & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
+            if (
+              budgeted &&
+              (edgesProcessed & 511) === 0 &&
+              performance.now() - startTime > frameBudgetMs
+            ) {
               break outer;
             }
             edgesProcessed++;
