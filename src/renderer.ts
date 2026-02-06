@@ -1245,7 +1245,7 @@ export class Renderer {
       this.packEdgeBuffer(this.edgeObjects);
     }
 
-    if (shouldAnimate) {
+    if (shouldAnimate && posChanged) {
       this.startDataAnimation();
     }
 
