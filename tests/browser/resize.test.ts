@@ -60,8 +60,26 @@ describe("Resize behavior", () => {
 
     // Recompute screen positions after resize
     const cam = renderer.getCameraState();
-    const posA = worldToScreen(nodes[0].x, nodes[0].y, cam.centerX, cam.centerY, cam.halfW, cam.halfH, 800, 400);
-    const posB = worldToScreen(nodes[1].x, nodes[1].y, cam.centerX, cam.centerY, cam.halfW, cam.halfH, 800, 400);
+    const posA = worldToScreen(
+      nodes[0].x,
+      nodes[0].y,
+      cam.centerX,
+      cam.centerY,
+      cam.halfW,
+      cam.halfH,
+      800,
+      400,
+    );
+    const posB = worldToScreen(
+      nodes[1].x,
+      nodes[1].y,
+      cam.centerX,
+      cam.centerY,
+      cam.halfW,
+      cam.halfH,
+      800,
+      400,
+    );
 
     assertNotBackground(canvas, posA.x, posA.y);
     assertNotBackground(canvas, posB.x, posB.y);
@@ -82,8 +100,26 @@ describe("Resize behavior", () => {
     renderer.render();
 
     const cam = renderer.getCameraState();
-    const posA = worldToScreen(nodes[0].x, nodes[0].y, cam.centerX, cam.centerY, cam.halfW, cam.halfH, 200, 600);
-    const posB = worldToScreen(nodes[1].x, nodes[1].y, cam.centerX, cam.centerY, cam.halfW, cam.halfH, 200, 600);
+    const posA = worldToScreen(
+      nodes[0].x,
+      nodes[0].y,
+      cam.centerX,
+      cam.centerY,
+      cam.halfW,
+      cam.halfH,
+      200,
+      600,
+    );
+    const posB = worldToScreen(
+      nodes[1].x,
+      nodes[1].y,
+      cam.centerX,
+      cam.centerY,
+      cam.halfW,
+      cam.halfH,
+      200,
+      600,
+    );
 
     assertNotBackground(canvas, posA.x, posA.y);
     assertNotBackground(canvas, posB.x, posB.y);

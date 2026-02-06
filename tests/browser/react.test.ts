@@ -92,7 +92,19 @@ describe("React <Graph> component", () => {
     expect(r0).toBeGreaterThan(g0);
 
     // Update to green
-    const greenNode: Node = { id: "a", x: 0, y: 0, r: 0, g: 1, b: 0, a: 1, s: 10, z: 0, i: 0, l: "" };
+    const greenNode: Node = {
+      id: "a",
+      x: 0,
+      y: 0,
+      r: 0,
+      g: 1,
+      b: 0,
+      a: 1,
+      s: 10,
+      z: 0,
+      i: 0,
+      l: "",
+    };
     mount({ nodes: [greenNode], animationDuration: 0 });
     await flushReact();
 

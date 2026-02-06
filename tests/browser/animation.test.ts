@@ -29,8 +29,15 @@ describe("Fade-in animation", () => {
     const nodes = [nodeA, nodeB, nodeC];
 
     // Start with one existing edge so animation triggers on next setEdges
-    const initialEdge: Edge[] = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 0, b: 0, a: 1, s: 3, z: 0 }];
-    renderer = new Renderer({ canvas, nodes, edges: initialEdge, animationDuration: ANIM_DURATION });
+    const initialEdge: Edge[] = [
+      { id: "ab", src: "a", tgt: "b", r: 1, g: 0, b: 0, a: 1, s: 3, z: 0 },
+    ];
+    renderer = new Renderer({
+      canvas,
+      nodes,
+      edges: initialEdge,
+      animationDuration: ANIM_DURATION,
+    });
     renderer.setCurvature(0);
     renderer.fitToNodes(0);
     renderer.render();
@@ -94,8 +101,32 @@ describe("Fade-in animation", () => {
 
   it("existing edges interpolate color during animation", async () => {
     canvas = createTestCanvas();
-    const nodeA: Node = { id: "a", x: -30, y: 0, r: 0.5, g: 0.5, b: 0.5, a: 1, s: 5, z: 0, i: 0, l: "" };
-    const nodeB: Node = { id: "b", x: 30, y: 0, r: 0.5, g: 0.5, b: 0.5, a: 1, s: 5, z: 0, i: 0, l: "" };
+    const nodeA: Node = {
+      id: "a",
+      x: -30,
+      y: 0,
+      r: 0.5,
+      g: 0.5,
+      b: 0.5,
+      a: 1,
+      s: 5,
+      z: 0,
+      i: 0,
+      l: "",
+    };
+    const nodeB: Node = {
+      id: "b",
+      x: 30,
+      y: 0,
+      r: 0.5,
+      g: 0.5,
+      b: 0.5,
+      a: 1,
+      s: 5,
+      z: 0,
+      i: 0,
+      l: "",
+    };
     const nodes = [nodeA, nodeB];
 
     // Start with a red edge
