@@ -50,6 +50,8 @@ interface LabelEntry {
   el: HTMLDivElement;
   active: boolean;
   key: string;
+  lastLx: number;
+  lastLy: number;
 }
 
 /**
@@ -252,8 +254,12 @@ export class LabelOverlay {
         entry.el.textContent = label;
         entry.key = label;
       }
-      // Only update the two dynamic properties (static ones set in acquireElement)
-      entry.el.style.transform = "translate3d(" + lx + "px," + ly + "px,0)";
+      // Only update dynamic properties; skip transform when position unchanged
+      if (lx !== entry.lastLx || ly !== entry.lastLy) {
+        entry.el.style.transform = "translate3d(" + lx + "px," + ly + "px,0)";
+        entry.lastLx = lx;
+        entry.lastLy = ly;
+      }
       entry.el.style.opacity = "1";
       entry.active = true;
     }
@@ -277,7 +283,7 @@ export class LabelOverlay {
       "position:absolute;top:0;left:0;white-space:nowrap;will-change:transform,opacity;transition:opacity 0.15s;opacity:0;";
     if (this.labelClass) el.className = this.labelClass;
     this.overlay.appendChild(el);
-    const entry: LabelEntry = { el, active: false, key: "" };
+    const entry: LabelEntry = { el, active: false, key: "", lastLx: NaN, lastLy: NaN };
     this.pool.push(entry);
     this.poolIndex++;
     return entry;
