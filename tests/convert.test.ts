@@ -52,30 +52,30 @@ describe("toRenderNodes", () => {
     ]);
     const nodes = toRenderNodes(step);
 
-    // dynamodb:table → blue
-    expect(nodes[0].r).toBeCloseTo(0.29);
-    expect(nodes[0].g).toBeCloseTo(0.47);
-    expect(nodes[0].b).toBeCloseTo(0.82);
+    // dynamodb:table → database green (#2d9c4f)
+    expect(nodes[0].r).toBeCloseTo(0.18);
+    expect(nodes[0].g).toBeCloseTo(0.61);
+    expect(nodes[0].b).toBeCloseTo(0.31);
 
-    // ec2:instance → yellow
-    expect(nodes[1].r).toBeCloseTo(0.95);
-    expect(nodes[1].g).toBeCloseTo(0.77);
-    expect(nodes[1].b).toBeCloseTo(0.06);
+    // ec2:instance → compute blue (#4a90e2)
+    expect(nodes[1].r).toBeCloseTo(0.29);
+    expect(nodes[1].g).toBeCloseTo(0.56);
+    expect(nodes[1].b).toBeCloseTo(0.89);
 
-    // iam:role → red
-    expect(nodes[2].r).toBeCloseTo(0.86);
-    expect(nodes[2].g).toBeCloseTo(0.21);
-    expect(nodes[2].b).toBeCloseTo(0.27);
+    // iam:role → principal orange (#ba5312)
+    expect(nodes[2].r).toBeCloseTo(0.73);
+    expect(nodes[2].g).toBeCloseTo(0.33);
+    expect(nodes[2].b).toBeCloseTo(0.07);
 
-    // iam:user → dark red
-    expect(nodes[3].r).toBeCloseTo(0.72);
-    expect(nodes[3].g).toBeCloseTo(0.15);
-    expect(nodes[3].b).toBeCloseTo(0.22);
+    // iam:user → principal orange (#ba5312)
+    expect(nodes[3].r).toBeCloseTo(0.73);
+    expect(nodes[3].g).toBeCloseTo(0.33);
+    expect(nodes[3].b).toBeCloseTo(0.07);
 
-    // lambda:function → orange
-    expect(nodes[4].r).toBeCloseTo(0.95);
-    expect(nodes[4].g).toBeCloseTo(0.61);
-    expect(nodes[4].b).toBeCloseTo(0.07);
+    // lambda:function → compute blue (#4a90e2)
+    expect(nodes[4].r).toBeCloseTo(0.29);
+    expect(nodes[4].g).toBeCloseTo(0.56);
+    expect(nodes[4].b).toBeCloseTo(0.89);
   });
 
   it("uses default color for unknown types", () => {

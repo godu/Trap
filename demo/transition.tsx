@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Graph } from "../src/react";
 import type { GraphRef } from "../src/react";
 import { toRenderNodes, toEdges } from "./graph/convert";
@@ -32,15 +32,6 @@ function App() {
   const nodes = useMemo(() => toRenderNodes(steps[stepIndex]), [stepIndex]);
   const edges = useMemo(() => toEdges(steps[stepIndex]), [stepIndex]);
 
-  // Fit to nodes on step change
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    const firstRender = isFirstRender.current;
-    isFirstRender.current = false;
-    requestAnimationFrame(() => {
-      graphRef.current?.fitToNodes(firstRender ? 0 : undefined);
-    });
-  }, [stepIndex]);
 
   const handleRender = useCallback(() => {
     fpsRef.current?.countFrame();
@@ -76,6 +67,7 @@ function App() {
           ref={graphRef}
           nodes={nodes}
           edges={edges}
+          fitKey={stepIndex}
           icons={ICON_SVGS}
           labelClass="graph-label"
           onRender={handleRender}

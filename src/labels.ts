@@ -77,7 +77,7 @@ export class LabelOverlay {
   private lastCenterX = NaN;
   private lastCenterY = NaN;
   private lastHalfW = NaN;
-  private lastNodeCount = -1;
+  private lastNodes: readonly Node[] | null = null;
 
   constructor(options: LabelOverlayOptions) {
     this.minScreenRadius = options.minScreenRadius ?? 8;
@@ -111,19 +111,19 @@ export class LabelOverlay {
       maxScreenRadius: nodeMaxR,
     } = camera;
 
-    // Skip update when camera and node count are unchanged
+    // Skip update when camera and data are unchanged
     if (
       centerX === this.lastCenterX &&
       centerY === this.lastCenterY &&
       halfW === this.lastHalfW &&
-      nodes.length === this.lastNodeCount
+      nodes === this.lastNodes
     ) {
       return;
     }
     this.lastCenterX = centerX;
     this.lastCenterY = centerY;
     this.lastHalfW = halfW;
-    this.lastNodeCount = nodes.length;
+    this.lastNodes = nodes;
 
     // Precompute reciprocals to replace divisions with multiplications
     const invDoubleHalfW = 1 / (2 * halfW);
@@ -282,5 +282,6 @@ export class LabelOverlay {
     this.pool.length = 0;
     this.sizeCache.clear();
     this.candidates.length = 0;
+    this.lastNodes = null;
   }
 }
