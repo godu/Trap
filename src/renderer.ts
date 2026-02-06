@@ -821,9 +821,14 @@ export class Renderer {
       f32[fi + 4] = node.icon ?? 0;
     }
     const byteLen = sorted.length * 20;
+    const view = this.nodeU8!.subarray(0, byteLen);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.nodeInstanceBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.nodeU8!.subarray(0, byteLen), gl.DYNAMIC_DRAW);
-    this.nodeGpuBytes = byteLen;
+    if (byteLen === this.nodeGpuBytes) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, view);
+    } else {
+      gl.bufferData(gl.ARRAY_BUFFER, view, gl.DYNAMIC_DRAW);
+      this.nodeGpuBytes = byteLen;
+    }
   }
 
   private setupEdgeGeometry(gl: WebGL2RenderingContext): WebGLVertexArrayObject {
@@ -1106,7 +1111,7 @@ export class Renderer {
   }
 
   /** Fast path: update only color bytes in packed edge buffer (skip sort/AABB/grid). */
-  private recolorEdgeBuffer(edges: Edge[]): void {
+  private recolorEdgeBuffer(): void {
     const u32 = this.edgeU32;
     const refs = this.packedEdgeRef;
     const count = this.totalEdgeCount;
@@ -1148,7 +1153,7 @@ export class Renderer {
     for (const e of edges) this.edgeMap.set(e.id, e);
 
     if (colorOnly) {
-      this.recolorEdgeBuffer(edges);
+      this.recolorEdgeBuffer();
     } else {
       this.packEdgeBuffer(edges);
     }
@@ -2428,8 +2433,9 @@ export class Renderer {
     let visibleCount = 0;
 
     // Time budget: 8ms during motion to maintain 60fps, unlimited when idle
-    const frameBudgetMs = this.inMotion ? 8 : Infinity;
-    const startTime = performance.now();
+    const budgeted = this.inMotion;
+    const frameBudgetMs = budgeted ? 8 : 0;
+    const startTime = budgeted ? performance.now() : 0;
 
     // Use grid spatial index for O(visible cells) culling instead of O(n)
     const grid = this.edgeGrid;
@@ -2477,8 +2483,8 @@ export class Renderer {
           const count = gridCounts[cellIdx];
 
           for (let j = 0; j < count; j++) {
-            // Check time budget every 512 edges
-            if ((edgesProcessed & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
+            // Check time budget every 512 edges (skip when not in motion)
+            if (budgeted && (edgesProcessed & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
               break outer;
             }
             edgesProcessed++;
@@ -2527,8 +2533,8 @@ export class Renderer {
     } else {
       // Fallback: linear scan if grid not available
       for (let i = 0; i < total; i++) {
-        // Check time budget every 512 edges
-        if ((i & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
+        // Check time budget every 512 edges (skip when not in motion)
+        if (budgeted && (i & 511) === 0 && performance.now() - startTime > frameBudgetMs) {
           break;
         }
 
