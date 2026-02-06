@@ -472,6 +472,8 @@ export class Renderer {
   private gridMinY = 0;
   private gridCellW = 0;
   private gridCellH = 0;
+  private gridInvCellW = 0;
+  private gridInvCellH = 0;
 
   // Motion-based cached rendering: cache culled edges during motion, reuse on subsequent frames
   private inMotion = false;
@@ -884,6 +886,8 @@ export class Renderer {
     this.gridMinY = this.allEdgesMinY;
     this.gridCellW = boundsW > 0 ? boundsW / this.gridCellsX : 1;
     this.gridCellH = boundsH > 0 ? boundsH / this.gridCellsY : 1;
+    this.gridInvCellW = 1 / this.gridCellW;
+    this.gridInvCellH = 1 / this.gridCellH;
 
     // Reset cell counts
     const counts = this.edgeGridCounts!;
@@ -894,8 +898,8 @@ export class Renderer {
     const gridCellsY = this.gridCellsY;
     const gridMinX = this.gridMinX;
     const gridMinY = this.gridMinY;
-    const cellW = this.gridCellW;
-    const cellH = this.gridCellH;
+    const invCellW = this.gridInvCellW;
+    const invCellH = this.gridInvCellH;
     const grid = this.edgeGrid!;
 
     // Assign each edge to cells it intersects
@@ -909,10 +913,10 @@ export class Renderer {
       const eMaxY = aabb[aabbIdx + 3];
 
       // Compute cell range this edge spans (inline clamp avoids 12 function calls)
-      let cx0 = Math.floor((eMinX - gridMinX) / cellW);
-      let cy0 = Math.floor((eMinY - gridMinY) / cellH);
-      let cx1 = Math.floor((eMaxX - gridMinX) / cellW);
-      let cy1 = Math.floor((eMaxY - gridMinY) / cellH);
+      let cx0 = Math.floor((eMinX - gridMinX) * invCellW);
+      let cy0 = Math.floor((eMinY - gridMinY) * invCellH);
+      let cx1 = Math.floor((eMaxX - gridMinX) * invCellW);
+      let cy1 = Math.floor((eMaxY - gridMinY) * invCellH);
       if (cx0 < 0) cx0 = 0; else if (cx0 > maxCellIdxX) cx0 = maxCellIdxX;
       if (cy0 < 0) cy0 = 0; else if (cy0 > maxCellIdxY) cy0 = maxCellIdxY;
       if (cx1 < 0) cx1 = 0; else if (cx1 > maxCellIdxX) cx1 = maxCellIdxX;
@@ -2160,16 +2164,16 @@ export class Renderer {
       const gridCellsY = this.gridCellsY;
       const gridMinX = this.gridMinX;
       const gridMinY = this.gridMinY;
-      const cellW = this.gridCellW;
-      const cellH = this.gridCellH;
+      const invCellW = this.gridInvCellW;
+      const invCellH = this.gridInvCellH;
       const maxCellIdxX = gridCellsX - 1;
       const maxCellIdxY = gridCellsY - 1;
 
       // Inline clamp: faster than nested Math.max/Math.min calls
-      let minCellX = Math.floor((vpMinX - gridMinX) / cellW);
-      let minCellY = Math.floor((vpMinY - gridMinY) / cellH);
-      let maxCellX = Math.floor((vpMaxX - gridMinX) / cellW);
-      let maxCellY = Math.floor((vpMaxY - gridMinY) / cellH);
+      let minCellX = Math.floor((vpMinX - gridMinX) * invCellW);
+      let minCellY = Math.floor((vpMinY - gridMinY) * invCellH);
+      let maxCellX = Math.floor((vpMaxX - gridMinX) * invCellW);
+      let maxCellY = Math.floor((vpMaxY - gridMinY) * invCellH);
       if (minCellX < 0) minCellX = 0; else if (minCellX > maxCellIdxX) minCellX = maxCellIdxX;
       if (minCellY < 0) minCellY = 0; else if (minCellY > maxCellIdxY) minCellY = maxCellIdxY;
       if (maxCellX < 0) maxCellX = 0; else if (maxCellX > maxCellIdxX) maxCellX = maxCellIdxX;
