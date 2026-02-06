@@ -2250,11 +2250,16 @@ export class Renderer {
     return this.displayNodes.length > 0 ? this.displayNodes : this.nodes;
   }
 
-  private cancelAnimation(): void {
+  /** Cancel only the fitToNodes camera animation (preserves zoom state). */
+  private cancelCameraAnimation(): void {
     if (this.animationId !== null) {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+  }
+
+  private cancelAnimation(): void {
+    this.cancelCameraAnimation();
     if (this.zoomAnimId !== null) {
       cancelAnimationFrame(this.zoomAnimId);
       this.zoomAnimId = null;
@@ -2301,7 +2306,7 @@ export class Renderer {
   }
 
   private zoomAt(screenX: number, screenY: number, factor: number): void {
-    this.cancelAnimation();
+    this.cancelCameraAnimation();
 
     // Compute world position inline to avoid function call overhead
     const rect = this.getRect();
