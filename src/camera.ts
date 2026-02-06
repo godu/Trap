@@ -24,7 +24,7 @@ export function computeBounds(nodes: Node[]): Bounds {
     const node = nodes[i];
     const x = node.x;
     const y = node.y;
-    const r = node.radius;
+    const r = node.s;
     if (x - r < minX) minX = x - r;
     if (x + r > maxX) maxX = x + r;
     if (y - r < minY) minY = y - r;

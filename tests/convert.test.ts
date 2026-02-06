@@ -36,10 +36,10 @@ describe("toRenderNodes", () => {
     expect(nodes[0].id).toBe("myId");
   });
 
-  it("includes opacity", () => {
+  it("includes alpha", () => {
     const step = makeStep([["a", "aws:iam:role", 0, 0]]);
     const nodes = toRenderNodes(step);
-    expect(nodes[0].opacity).toBe(1.0);
+    expect(nodes[0].a).toBe(1.0);
   });
 
   it("maps node types to correct RGB colors", () => {
@@ -95,7 +95,7 @@ describe("toRenderNodes", () => {
     expect(nodes[0].y).toBe(-17.3);
   });
 
-  it("selected nodes get larger radius", () => {
+  it("selected nodes get larger size", () => {
     const step = makeStep([
       ["a", "aws:iam:role", 0, 0, true],
       ["b", "aws:iam:role", 1, 1, false],
@@ -103,9 +103,9 @@ describe("toRenderNodes", () => {
     ]);
     const nodes = toRenderNodes(step);
 
-    expect(nodes[0].radius).toBe(5.0);
-    expect(nodes[1].radius).toBe(4.0);
-    expect(nodes[2].radius).toBe(4.0);
+    expect(nodes[0].s).toBe(5.0);
+    expect(nodes[1].s).toBe(4.0);
+    expect(nodes[2].s).toBe(4.0);
   });
 });
 
@@ -134,7 +134,7 @@ describe("toEdges", () => {
     expect(edges[0].id).toBe("a->b");
   });
 
-  it("sets source and target node ids", () => {
+  it("sets src and tgt node ids", () => {
     const step = makeStep(
       [
         ["a", "test", 0, 0],
@@ -143,8 +143,8 @@ describe("toEdges", () => {
       [["a", "b", "Direct"]],
     );
     const edges = toEdges(step);
-    expect(edges[0].source).toBe("a");
-    expect(edges[0].target).toBe("b");
+    expect(edges[0].src).toBe("a");
+    expect(edges[0].tgt).toBe("b");
   });
 
   it("maps Direct edges to correct RGBA", () => {

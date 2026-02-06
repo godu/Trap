@@ -143,9 +143,9 @@ export class LabelOverlay {
     let count = 0;
     for (let i = 0, len = nodes.length; i < len; i++) {
       const node = nodes[i];
-      if (!node.label) continue;
+      if (!node.l) continue;
 
-      const r = node.radius;
+      const r = node.s;
       // Frustum cull (conservative — include radius margin)
       if (
         node.x + r < vpLeft ||
@@ -194,7 +194,7 @@ export class LabelOverlay {
 
     for (let i = 0; i < cap; i++) {
       const c = candidates[i];
-      const label = c.node.label!;
+      const label = c.node.l;
 
       // Get or measure label size
       let size = this.sizeCache.get(label);

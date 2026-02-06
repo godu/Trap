@@ -341,13 +341,13 @@ export function wait(ms: number): Promise<void> {
 export function threeNodeGraph(): { nodes: Node[]; edges: Edge[] } {
   return {
     nodes: [
-      { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 5 },
-      { id: "b", x: 50, y: 0, r: 0, g: 1, b: 0, radius: 5 },
-      { id: "c", x: 0, y: 50, r: 0, g: 0, b: 1, radius: 5 },
+      { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" },
+      { id: "b", x: 50, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" },
+      { id: "c", x: 0, y: 50, r: 0, g: 0, b: 1, a: 1, s: 5, z: 0, i: 0, l: "" },
     ],
     edges: [
-      { id: "ab", source: "a", target: "b", r: 1, g: 1, b: 0, a: 1, width: 2 },
-      { id: "ac", source: "a", target: "c", r: 1, g: 0, b: 1, a: 1, width: 2 },
+      { id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 0, a: 1, s: 2, z: 0 },
+      { id: "ac", src: "a", tgt: "c", r: 1, g: 0, b: 1, a: 1, s: 2, z: 0 },
     ],
   };
 }
@@ -355,6 +355,6 @@ export function threeNodeGraph(): { nodes: Node[]; edges: Edge[] } {
 /** Single red node at origin for simple pixel tests. */
 export function singleNodeGraph(): { nodes: Node[] } {
   return {
-    nodes: [{ id: "solo", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 10 }],
+    nodes: [{ id: "solo", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 10, z: 0, i: 0, l: "" }],
   };
 }

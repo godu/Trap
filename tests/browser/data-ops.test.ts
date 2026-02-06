@@ -25,8 +25,20 @@ describe("Data Operations", () => {
   describe("setNodes", () => {
     it("updates node positions on screen", () => {
       canvas = createTestCanvas();
-      const nodeA: Node = { id: "a", x: -20, y: 0, r: 1, g: 0, b: 0, radius: 8 };
-      const nodeB: Node = { id: "b", x: 20, y: 0, r: 0, g: 1, b: 0, radius: 8 };
+      const nodeA: Node = {
+        id: "a",
+        x: -20,
+        y: 0,
+        r: 1,
+        g: 0,
+        b: 0,
+        a: 1,
+        s: 8,
+        z: 0,
+        i: 0,
+        l: "",
+      };
+      const nodeB: Node = { id: "b", x: 20, y: 0, r: 0, g: 1, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);
@@ -76,8 +88,20 @@ describe("Data Operations", () => {
   describe("setEdges", () => {
     it("updates rendered edges", () => {
       canvas = createTestCanvas();
-      const nodeA: Node = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB: Node = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA: Node = {
+        id: "a",
+        x: -30,
+        y: 0,
+        r: 1,
+        g: 0,
+        b: 0,
+        a: 1,
+        s: 5,
+        z: 0,
+        i: 0,
+        l: "",
+      };
+      const nodeB: Node = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
       // Start with no edges
       renderer = createTestRenderer(canvas, nodes);
@@ -94,9 +118,7 @@ describe("Data Operations", () => {
       assertIsBackground(canvas, midX, midY);
 
       // Add an edge
-      const edges: Edge[] = [
-        { id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 3 },
-      ];
+      const edges: Edge[] = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 3, z: 0 }];
       renderer.setEdges(edges);
       renderer.render();
 
@@ -108,12 +130,22 @@ describe("Data Operations", () => {
   describe("setCurvature", () => {
     it("setCurvature(0) makes edges straight", () => {
       canvas = createTestCanvas();
-      const nodeA: Node = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB: Node = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA: Node = {
+        id: "a",
+        x: -30,
+        y: 0,
+        r: 1,
+        g: 0,
+        b: 0,
+        a: 1,
+        s: 5,
+        z: 0,
+        i: 0,
+        l: "",
+      };
+      const nodeB: Node = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
-      const edges: Edge[] = [
-        { id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 3 },
-      ];
+      const edges: Edge[] = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 3, z: 0 }];
       renderer = createTestRenderer(canvas, nodes, { edges });
       renderer.setCurvature(0);
       renderer.fitToNodes(0);
@@ -137,10 +169,10 @@ describe("Data Operations", () => {
       canvas = createTestCanvas();
       // Widely spread nodes
       const nodes: Node[] = [
-        { id: "a", x: -100, y: -100, r: 1, g: 0, b: 0, radius: 8 },
-        { id: "b", x: 100, y: 100, r: 0, g: 1, b: 0, radius: 8 },
-        { id: "c", x: -100, y: 100, r: 0, g: 0, b: 1, radius: 8 },
-        { id: "d", x: 100, y: -100, r: 1, g: 1, b: 0, radius: 8 },
+        { id: "a", x: -100, y: -100, r: 1, g: 0, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
+        { id: "b", x: 100, y: 100, r: 0, g: 1, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
+        { id: "c", x: -100, y: 100, r: 0, g: 0, b: 1, a: 1, s: 8, z: 0, i: 0, l: "" },
+        { id: "d", x: 100, y: -100, r: 1, g: 1, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
       ];
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);
@@ -156,8 +188,8 @@ describe("Data Operations", () => {
     it("works after node positions change", () => {
       canvas = createTestCanvas();
       const nodes: Node[] = [
-        { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 8 },
-        { id: "b", x: 10, y: 0, r: 0, g: 1, b: 0, radius: 8 },
+        { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
+        { id: "b", x: 10, y: 0, r: 0, g: 1, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
       ];
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);
@@ -165,8 +197,8 @@ describe("Data Operations", () => {
 
       // Move nodes far apart
       const newNodes: Node[] = [
-        { id: "a", x: -200, y: 0, r: 1, g: 0, b: 0, radius: 8 },
-        { id: "b", x: 200, y: 0, r: 0, g: 1, b: 0, radius: 8 },
+        { id: "a", x: -200, y: 0, r: 1, g: 0, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
+        { id: "b", x: 200, y: 0, r: 0, g: 1, b: 0, a: 1, s: 8, z: 0, i: 0, l: "" },
       ];
       renderer.setNodes(newNodes);
       renderer.fitToNodes(0);
@@ -183,7 +215,9 @@ describe("Data Operations", () => {
   describe("animation", () => {
     it("completes to target state after animation duration", async () => {
       canvas = createTestCanvas();
-      const nodes: Node[] = [{ id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 10 }];
+      const nodes: Node[] = [
+        { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 10, z: 0, i: 0, l: "" },
+      ];
       // Use animationDuration > 0 for this test
       renderer = new Renderer({
         canvas,
@@ -194,7 +228,9 @@ describe("Data Operations", () => {
       renderer.render();
 
       // Change color from red to green
-      renderer.setNodes([{ id: "a", x: 0, y: 0, r: 0, g: 1, b: 0, radius: 10 }]);
+      renderer.setNodes([
+        { id: "a", x: 0, y: 0, r: 0, g: 1, b: 0, a: 1, s: 10, z: 0, i: 0, l: "" },
+      ]);
 
       // Wait for animation to complete
       await wait(350);
