@@ -439,6 +439,7 @@ export class Renderer {
   private zoomTargetCenterX = 0;
   private zoomTargetCenterY = 0;
   private zoomAnimating = false;
+  private zoomAnimId: number | null = null;
   private lastZoomRenderTime = 0; // for frame skipping during zoom
 
   // Projection dirty flag (avoid recomputing when camera unchanged)
@@ -2254,6 +2255,10 @@ export class Renderer {
       cancelAnimationFrame(this.animationId);
       this.animationId = null;
     }
+    if (this.zoomAnimId !== null) {
+      cancelAnimationFrame(this.zoomAnimId);
+      this.zoomAnimId = null;
+    }
     this.zoomAnimating = false;
   }
 
@@ -2322,7 +2327,7 @@ export class Renderer {
     // Start animation if not running
     if (!this.zoomAnimating) {
       this.zoomAnimating = true;
-      requestAnimationFrame(this.boundZoomAnimFrame);
+      this.zoomAnimId = requestAnimationFrame(this.boundZoomAnimFrame);
     }
   }
 
@@ -2351,13 +2356,14 @@ export class Renderer {
     // Continue if not close enough (relative epsilon avoids Math.abs)
     const ratio = this.halfW / this.zoomTargetHalfW;
     if (ratio < 0.999 || ratio > 1.001) {
-      requestAnimationFrame(this.boundZoomAnimFrame);
+      this.zoomAnimId = requestAnimationFrame(this.boundZoomAnimFrame);
     } else {
       // Snap to target and stop - always render final frame with full culling
       this.centerX = this.zoomTargetCenterX;
       this.centerY = this.zoomTargetCenterY;
       this.halfW = this.zoomTargetHalfW;
       this.halfH = this.zoomTargetHalfH;
+      this.zoomAnimId = null;
       this.zoomAnimating = false;
       this.projectionDirty = true;
       this.lastZoomRenderTime = 0; // reset for next zoom
