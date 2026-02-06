@@ -69,9 +69,9 @@ export function readPixelAt(
   return [pixel[0], pixel[1], pixel[2], pixel[3]];
 }
 
-/** Background clear color is ~RGB(17, 17, 17). */
+/** Background is transparent black. */
 export function isBackground(r: number, g: number, b: number): boolean {
-  return r < 25 && g < 25 && b < 25;
+  return r < 5 && g < 5 && b < 5;
 }
 
 export function assertNotBackground(canvas: HTMLCanvasElement, cssX: number, cssY: number): void {

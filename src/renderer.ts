@@ -642,7 +642,7 @@ export class Renderer {
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.clearColor(0.067, 0.067, 0.067, 1.0);
+    gl.clearColor(0, 0, 0, 0);
 
     this.resizeObserver = new ResizeObserver(() => {
       this.resizeDirty = true;

@@ -23,21 +23,19 @@ describe("Rendering", () => {
   });
 
   describe("background", () => {
-    it("clear color is dark gray", () => {
+    it("clear color is transparent", () => {
       canvas = createTestCanvas();
       const { nodes } = singleNodeGraph();
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);
       renderer.render();
 
-      // Corner far from node should be background
-      const [r, g, b] = readPixelAt(canvas, 5, 5);
-      expect(r).toBeGreaterThanOrEqual(14);
-      expect(r).toBeLessThanOrEqual(20);
-      expect(g).toBeGreaterThanOrEqual(14);
-      expect(g).toBeLessThanOrEqual(20);
-      expect(b).toBeGreaterThanOrEqual(14);
-      expect(b).toBeLessThanOrEqual(20);
+      // Corner far from node should be transparent
+      const [r, g, b, a] = readPixelAt(canvas, 5, 5);
+      expect(r).toBe(0);
+      expect(g).toBe(0);
+      expect(b).toBe(0);
+      expect(a).toBe(0);
     });
   });
 
@@ -126,13 +124,12 @@ describe("Rendering", () => {
       const posFull = nodeScreenPos(fullNode, nodes, canvas);
       const posDim = nodeScreenPos(dimNode, nodes, canvas);
 
-      // Blend mode ONE, ONE_MINUS_SRC_ALPHA means background bleeds through
-      // for low-opacity nodes. The dim node's green channel should be higher
-      // (dark gray background leaking through) than the full-opacity node.
-      const [, gFull] = readPixelAt(canvas, posFull.x, posFull.y);
-      const [, gDim] = readPixelAt(canvas, posDim.x, posDim.y);
+      // With premultiplied alpha, the dim node's red channel should be
+      // noticeably lower than the full-opacity node.
+      const [rFull] = readPixelAt(canvas, posFull.x, posFull.y);
+      const [rDim] = readPixelAt(canvas, posDim.x, posDim.y);
 
-      expect(gDim).toBeGreaterThan(gFull);
+      expect(rDim).toBeLessThan(rFull);
     });
   });
 
