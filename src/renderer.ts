@@ -475,6 +475,16 @@ export class Renderer {
   private gridInvCellW = 0;
   private gridInvCellH = 0;
 
+  // Node spatial grid for O(1) hit testing instead of O(n)
+  private nodeGridCellsX = 0;
+  private nodeGridCellsY = 0;
+  private nodeGrid: Uint32Array[] | null = null;
+  private nodeGridCounts: Uint32Array | null = null;
+  private nodeGridMinX = 0;
+  private nodeGridMinY = 0;
+  private nodeGridInvCellW = 0;
+  private nodeGridInvCellH = 0;
+
   // Motion-based cached rendering: cache culled edges during motion, reuse on subsequent frames
   private inMotion = false;
   private lastMotionTime = 0;
@@ -620,6 +630,80 @@ export class Renderer {
     this.nodeMap.clear();
     for (const node of nodes) {
       this.nodeMap.set(node.id, node);
+    }
+    this.buildNodeGrid(nodes);
+  }
+
+  /** Build spatial grid for fast node hit testing. */
+  private buildNodeGrid(nodes: Node[]): void {
+    const len = nodes.length;
+    if (len === 0) {
+      this.nodeGridCellsX = 0;
+      this.nodeGridCellsY = 0;
+      this.nodeGrid = null;
+      this.nodeGridCounts = null;
+      return;
+    }
+
+    // Compute bounds of all node centers
+    let minX = nodes[0].x;
+    let minY = nodes[0].y;
+    let maxX = minX;
+    let maxY = minY;
+    for (let i = 1; i < len; i++) {
+      const x = nodes[i].x;
+      const y = nodes[i].y;
+      if (x < minX) minX = x;
+      else if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      else if (y > maxY) maxY = y;
+    }
+
+    // Adaptive grid: ~16 nodes per cell, clamp to [4, 64]
+    const optimalCells = Math.sqrt(len / 16);
+    const gridSize = Math.max(4, Math.min(64, Math.round(optimalCells)));
+    this.nodeGridCellsX = gridSize;
+    this.nodeGridCellsY = gridSize;
+    const cellCount = gridSize * gridSize;
+
+    // Allocate grid arrays (reuse if same size)
+    if (!this.nodeGrid || this.nodeGrid.length !== cellCount) {
+      const grid: Uint32Array[] = [];
+      for (let i = 0; i < cellCount; i++) grid.push(new Uint32Array(32));
+      this.nodeGrid = grid;
+      this.nodeGridCounts = new Uint32Array(cellCount);
+    }
+
+    const boundsW = maxX - minX;
+    const boundsH = maxY - minY;
+    this.nodeGridMinX = minX;
+    this.nodeGridMinY = minY;
+    const cellW = boundsW > 0 ? boundsW / gridSize : 1;
+    const cellH = boundsH > 0 ? boundsH / gridSize : 1;
+    this.nodeGridInvCellW = 1 / cellW;
+    this.nodeGridInvCellH = 1 / cellH;
+
+    const counts = this.nodeGridCounts!;
+    counts.fill(0);
+    const grid = this.nodeGrid!;
+    const maxCellIdx = gridSize - 1;
+
+    for (let i = 0; i < len; i++) {
+      let cx = Math.floor((nodes[i].x - minX) * this.nodeGridInvCellW);
+      let cy = Math.floor((nodes[i].y - minY) * this.nodeGridInvCellH);
+      if (cx < 0) cx = 0; else if (cx > maxCellIdx) cx = maxCellIdx;
+      if (cy < 0) cy = 0; else if (cy > maxCellIdx) cy = maxCellIdx;
+      const cellIdx = cy * gridSize + cx;
+      const count = counts[cellIdx];
+      let cell = grid[cellIdx];
+      if (count >= cell.length) {
+        const newCell = new Uint32Array(cell.length * 2);
+        newCell.set(cell);
+        grid[cellIdx] = newCell;
+        cell = newCell;
+      }
+      cell[count] = i;
+      counts[cellIdx] = count + 1;
     }
   }
 
@@ -1347,30 +1431,84 @@ export class Renderer {
   // --- Hit testing ---
 
   private hitTestNode(worldX: number, worldY: number): Node | null {
-    let closest: Node | null = null;
-    let closestDist = Infinity;
-
     // Use canvas.width/dpr to avoid clientWidth layout query
     const clientW = this.canvas.width / this.cachedDpr || 1;
     const worldPerCssPx = (this.halfW * 2) / clientW;
     const minR = this.minScreenRadius * worldPerCssPx;
     const maxR = this.maxScreenRadius * worldPerCssPx;
 
+    const grid = this.nodeGrid;
+    const counts = this.nodeGridCounts;
     const nodes = this.nodes;
-    const len = nodes.length;
-    for (let i = 0; i < len; i++) {
-      const node = nodes[i];
-      const dx = worldX - node.x;
-      const dy = worldY - node.y;
-      const distSq = dx * dx + dy * dy;
-      // Clamp radius inline (avoid function call)
-      let r = node.radius;
-      if (r < minR) r = minR;
-      else if (r > maxR) r = maxR;
-      const rSq = r * r;
-      if (distSq < rSq && distSq < closestDist) {
-        closestDist = distSq;
-        closest = node;
+
+    // Fallback to linear scan if grid not built
+    if (!grid || !counts || this.nodeGridCellsX === 0) {
+      let closest: Node | null = null;
+      let closestDist = Infinity;
+      const len = nodes.length;
+      for (let i = 0; i < len; i++) {
+        const node = nodes[i];
+        const dx = worldX - node.x;
+        const dy = worldY - node.y;
+        const distSq = dx * dx + dy * dy;
+        let r = node.radius;
+        if (r < minR) r = minR;
+        else if (r > maxR) r = maxR;
+        if (distSq < r * r && distSq < closestDist) {
+          closestDist = distSq;
+          closest = node;
+        }
+      }
+      return closest;
+    }
+
+    // Spatial grid query: check cell containing point + neighbors (for nodes whose
+    // radius extends into adjacent cells)
+    const gridCellsX = this.nodeGridCellsX;
+    const gridCellsY = this.nodeGridCellsY;
+    const maxCellIdxX = gridCellsX - 1;
+    const maxCellIdxY = gridCellsY - 1;
+
+    // Search radius in cells: maxR determines how far a node center can be
+    // from the query point while still being hittable
+    const cellSearchX = Math.ceil(maxR * this.nodeGridInvCellW);
+    const cellSearchY = Math.ceil(maxR * this.nodeGridInvCellH);
+
+    let cx = Math.floor((worldX - this.nodeGridMinX) * this.nodeGridInvCellW);
+    let cy = Math.floor((worldY - this.nodeGridMinY) * this.nodeGridInvCellH);
+    if (cx < 0) cx = 0; else if (cx > maxCellIdxX) cx = maxCellIdxX;
+    if (cy < 0) cy = 0; else if (cy > maxCellIdxY) cy = maxCellIdxY;
+
+    let sx = cx - cellSearchX;
+    let sy = cy - cellSearchY;
+    let ex = cx + cellSearchX;
+    let ey = cy + cellSearchY;
+    if (sx < 0) sx = 0;
+    if (sy < 0) sy = 0;
+    if (ex > maxCellIdxX) ex = maxCellIdxX;
+    if (ey > maxCellIdxY) ey = maxCellIdxY;
+
+    let closest: Node | null = null;
+    let closestDist = Infinity;
+
+    for (let gy = sy; gy <= ey; gy++) {
+      for (let gx = sx; gx <= ex; gx++) {
+        const cellIdx = gy * gridCellsX + gx;
+        const count = counts[cellIdx];
+        const cell = grid[cellIdx];
+        for (let k = 0; k < count; k++) {
+          const node = nodes[cell[k]];
+          const dx = worldX - node.x;
+          const dy = worldY - node.y;
+          const distSq = dx * dx + dy * dy;
+          let r = node.radius;
+          if (r < minR) r = minR;
+          else if (r > maxR) r = maxR;
+          if (distSq < r * r && distSq < closestDist) {
+            closestDist = distSq;
+            closest = node;
+          }
+        }
       }
     }
 
