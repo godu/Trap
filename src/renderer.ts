@@ -1575,9 +1575,8 @@ export class Renderer {
           const dt = now - this.lastTapTime;
           const ddx = cx - this.lastTapX;
           const ddy = cy - this.lastTapY;
-          const tapDist = Math.sqrt(ddx * ddx + ddy * ddy);
 
-          if (dt < DOUBLE_TAP_TIMEOUT && tapDist < CLICK_THRESHOLD) {
+          if (dt < DOUBLE_TAP_TIMEOUT && ddx * ddx + ddy * ddy < CLICK_THRESHOLD * CLICK_THRESHOLD) {
             // Double tap
             clearTimeout(this.tapTimeoutId);
             this.lastTapTime = 0;
