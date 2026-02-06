@@ -2971,9 +2971,5 @@ export class Renderer {
     }
 
     this.resizeObserver.disconnect();
-
-    // Eagerly release GPU resources — context may persist until canvas is GC'd
-    const ext = gl.getExtension("WEBGL_lose_context");
-    if (ext) ext.loseContext();
   }
 }
