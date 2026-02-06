@@ -77,6 +77,8 @@ export class LabelOverlay {
   private lastCenterX = NaN;
   private lastCenterY = NaN;
   private lastHalfW = NaN;
+  private lastClientWidth = 0;
+  private lastClientHeight = 0;
   private lastNodes: readonly Node[] | null = null;
 
   constructor(options: LabelOverlayOptions) {
@@ -111,11 +113,13 @@ export class LabelOverlay {
       maxScreenRadius: nodeMaxR,
     } = camera;
 
-    // Skip update when camera and data are unchanged
+    // Skip update when camera, viewport size, and data are unchanged
     if (
       centerX === this.lastCenterX &&
       centerY === this.lastCenterY &&
       halfW === this.lastHalfW &&
+      clientWidth === this.lastClientWidth &&
+      clientHeight === this.lastClientHeight &&
       nodes === this.lastNodes
     ) {
       return;
@@ -123,6 +127,8 @@ export class LabelOverlay {
     this.lastCenterX = centerX;
     this.lastCenterY = centerY;
     this.lastHalfW = halfW;
+    this.lastClientWidth = clientWidth;
+    this.lastClientHeight = clientHeight;
     this.lastNodes = nodes;
 
     // Precompute reciprocals to replace divisions with multiplications
