@@ -49,7 +49,6 @@ export interface BackgroundEvent {
   originalEvent: MouseEvent | TouchEvent;
 }
 
-
 export interface RendererOptions {
   canvas: HTMLCanvasElement;
   nodes: Node[];
