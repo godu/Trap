@@ -25,6 +25,7 @@ export function toRenderNodes(step: GraphStep): Node[] {
       radius: gNode.selected ? SELECTED_NODE_RADIUS : NODE_RADIUS,
       opacity: 1.0,
       icon: TYPE_ICON_INDEX[gNode.type] ?? 0,
+      label: gNode.label,
     });
   }
   return nodes;

@@ -1,4 +1,4 @@
-import { Renderer } from "../src/index";
+import { Renderer, LabelOverlay } from "../src/index";
 import type { Node, Edge } from "../src/index";
 import { initFpsCounter, countRenderFrame } from "./fps";
 import smallResourcesUrl from "./small.minimal-resources.json?url";
@@ -45,6 +45,7 @@ function toNodes(data: Resource[]): Node[] {
       radius: NODE_RADIUS,
       opacity: 1.0,
       icon: TYPE_ICON_INDEX[res.InternalType] ?? 0,
+      label: res.InternalArn,
     };
   });
 }
@@ -122,10 +123,10 @@ function highlightNode(nodeId: string) {
 
   const highlightedNodeIds = new Set([nodeId, ...neighbors]);
 
-  const dimmedNodes = currentNodes.map((n) => ({
-    ...n,
-    opacity: highlightedNodeIds.has(n.id) ? 1.0 : DIM_OPACITY,
-  }));
+  const dimmedNodes = currentNodes.map((n) => {
+    const lit = highlightedNodeIds.has(n.id);
+    return { ...n, opacity: lit ? 1.0 : DIM_OPACITY, label: lit ? n.label : undefined };
+  });
 
   const dimmedEdges = currentEdges.map((e) => ({
     ...e,
@@ -142,10 +143,10 @@ function highlightEdge(edgeId: string) {
 
   const highlightedNodeIds = new Set([edge.source, edge.target]);
 
-  const dimmedNodes = currentNodes.map((n) => ({
-    ...n,
-    opacity: highlightedNodeIds.has(n.id) ? 1.0 : DIM_OPACITY,
-  }));
+  const dimmedNodes = currentNodes.map((n) => {
+    const lit = highlightedNodeIds.has(n.id);
+    return { ...n, opacity: lit ? 1.0 : DIM_OPACITY, label: lit ? n.label : undefined };
+  });
 
   const dimmedEdges = currentEdges.map((e) => ({
     ...e,
@@ -162,7 +163,10 @@ function clearHighlight() {
 }
 
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+const canvasContainer = document.getElementById("canvas-container")!;
 const eventInfo = document.getElementById("event-info")!;
+
+let labels!: LabelOverlay;
 
 function showEvent(type: string, target: string, id?: string) {
   eventInfo.textContent = id ? `${type} ${target} ${id}` : `${type} ${target}`;
@@ -191,7 +195,15 @@ const renderer = new Renderer({
     clearHighlight();
   },
   onBackgroundDblClick: (e) => showEvent(e.type, "background"),
-  onRender: countRenderFrame,
+  onRender() {
+    countRenderFrame();
+    labels.update(renderer.getNodes(), renderer.getCameraState());
+  },
+});
+
+labels = new LabelOverlay({
+  container: canvasContainer,
+  labelClass: "graph-label",
 });
 
 renderer.setIcons(ICON_SVGS);

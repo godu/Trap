@@ -1,4 +1,12 @@
-import type { Node, Edge, RendererOptions, NodeEvent, EdgeEvent, BackgroundEvent } from "./types";
+import type {
+  Node,
+  Edge,
+  RendererOptions,
+  NodeEvent,
+  EdgeEvent,
+  BackgroundEvent,
+  CameraState,
+} from "./types";
 import { vertexSource, fragmentSource, edgeVertexSource, edgeFragmentSource } from "./shaders";
 import { computeBounds, computeFitView } from "./camera";
 import { buildIconAtlas } from "./atlas";
@@ -449,6 +457,18 @@ export class Renderer {
   // Reusable Map + object pool for interpolateEdges
   private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
   private interpNodePool: { x: number; y: number; radius: number }[] = [];
+  private displayNodes: Node[] = [];
+  // Pre-allocated camera state (avoids allocation per frame)
+  private cameraState: CameraState = {
+    centerX: 0,
+    centerY: 0,
+    halfW: 1,
+    halfH: 1,
+    clientWidth: 0,
+    clientHeight: 0,
+    minScreenRadius: 2,
+    maxScreenRadius: 40,
+  };
 
   // Reusable sort scratch arrays (avoid .slice() allocation per upload)
   private nodeSortBuf: Node[] = [];
@@ -1344,6 +1364,7 @@ export class Renderer {
       this.sortedTargetNodes = null;
       this.sortedTargetEdges = null;
       this.interpNodePool.length = 0;
+      this.displayNodes.length = 0;
     }
   }
 
@@ -1352,6 +1373,8 @@ export class Renderer {
     this.ensureNodeBuffer(target.length);
     const f32 = this.nodeF32!;
     const u8 = this.nodeU8!;
+    const display = this.displayNodes;
+    display.length = target.length;
 
     const omt = 1 - t;
     for (let i = 0; i < target.length; i++) {
@@ -1360,27 +1383,57 @@ export class Renderer {
       const fi = i * 5;
       const bi = i * 20;
 
+      let ix: number;
+      let iy: number;
+      let ir: number;
       if (old) {
-        f32[fi] = old.x * omt + node.x * t;
-        f32[fi + 1] = old.y * omt + node.y * t;
+        ix = old.x * omt + node.x * t;
+        iy = old.y * omt + node.y * t;
+        ir = old.radius * omt + node.radius * t;
+        f32[fi] = ix;
+        f32[fi + 1] = iy;
         const opacity = (old.opacity ?? 1.0) * omt + (node.opacity ?? 1.0) * t;
         u8[bi + 8] = ((old.r * omt + node.r * t) * 255 + 0.5) | 0;
         u8[bi + 9] = ((old.g * omt + node.g * t) * 255 + 0.5) | 0;
         u8[bi + 10] = ((old.b * omt + node.b * t) * 255 + 0.5) | 0;
         u8[bi + 11] = (opacity * 255 + 0.5) | 0;
-        f32[fi + 3] = old.radius * omt + node.radius * t;
+        f32[fi + 3] = ir;
       } else {
         // New node — fade in
-        f32[fi] = node.x;
-        f32[fi + 1] = node.y;
+        ix = node.x;
+        iy = node.y;
+        ir = node.radius;
+        f32[fi] = ix;
+        f32[fi + 1] = iy;
         const opacity = (node.opacity ?? 1.0) * t;
         u8[bi + 8] = (node.r * 255 + 0.5) | 0;
         u8[bi + 9] = (node.g * 255 + 0.5) | 0;
         u8[bi + 10] = (node.b * 255 + 0.5) | 0;
         u8[bi + 11] = (opacity * 255 + 0.5) | 0;
-        f32[fi + 3] = node.radius;
+        f32[fi + 3] = ir;
       }
       f32[fi + 4] = node.icon ?? 0;
+      // Build display node with interpolated position for label overlay
+      const d = display[i];
+      if (d && d.id === node.id) {
+        d.x = ix;
+        d.y = iy;
+        d.radius = ir;
+      } else {
+        display[i] = {
+          id: node.id,
+          x: ix,
+          y: iy,
+          r: node.r,
+          g: node.g,
+          b: node.b,
+          radius: ir,
+          opacity: node.opacity,
+          zIndex: node.zIndex,
+          icon: node.icon,
+          label: node.label,
+        };
+      }
     }
 
     const byteLen = target.length * 20;
@@ -2166,6 +2219,25 @@ export class Renderer {
     this.worldResult.x = this.centerX + (nx - 0.5) * 2 * this.halfW;
     this.worldResult.y = this.centerY - (ny - 0.5) * 2 * this.halfH;
     return this.worldResult;
+  }
+
+  /** Returns the current camera state. Object is reused across calls — do not cache. */
+  getCameraState(): CameraState {
+    const s = this.cameraState;
+    s.centerX = this.centerX;
+    s.centerY = this.centerY;
+    s.halfW = this.halfW;
+    s.halfH = this.halfH;
+    s.clientWidth = this.canvas.width / this.cachedDpr || 1;
+    s.clientHeight = this.canvas.height / this.cachedDpr || 1;
+    s.minScreenRadius = this.minScreenRadius;
+    s.maxScreenRadius = this.maxScreenRadius;
+    return s;
+  }
+
+  /** Returns nodes with interpolated positions during animation, otherwise the current nodes. */
+  getNodes(): readonly Node[] {
+    return this.displayNodes.length > 0 ? this.displayNodes : this.nodes;
   }
 
   private cancelAnimation(): void {
