@@ -23,11 +23,19 @@ export const TYPE_ICON_INDEX: Record<string, number> = {
   // Compute — index 2
   "aws:cloudformation:stack": 2,
   "aws:ec2:instance": 2,
+  "aws:ecs:service": 2,
   "aws:ecs:task-definition": 2,
   "aws:lambda:function": 2,
+  "aws:ssm:parameter": 2,
   // Database (data) — index 3
   "aws:dynamodb:table": 3,
+  "aws:elasticache:cachecluster": 3,
+  "aws:es:domain": 3,
+  "aws:kinesis:stream": 3,
   "aws:kms:key": 3,
+  "aws:rds:cluster": 3,
   "aws:s3:bucket": 3,
+  "aws:secretsmanager:secret": 3,
+  "aws:sns:topic": 3,
   "aws:sqs:queue": 3,
 };
