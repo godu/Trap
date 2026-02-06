@@ -20,8 +20,6 @@ out vec2 v_uv;
 flat out vec2 v_atlasOrigin;
 flat out vec2 v_atlasScale;
 flat out float v_hasIcon;
-flat out float v_worldRadius;
-
 void main() {
   float radius = clamp(a_radius, u_minRadius, u_maxRadius);
 
@@ -34,7 +32,6 @@ void main() {
 
   v_color = a_color;
   v_uv = a_quadVertex;
-  v_worldRadius = radius;
 
   // Icon atlas UV — computed per-instance (flat) instead of per-fragment
   float cols = max(u_atlasColumns, 1.0);
@@ -58,7 +55,6 @@ in vec2 v_uv;
 flat in vec2 v_atlasOrigin;
 flat in vec2 v_atlasScale;
 flat in float v_hasIcon;
-flat in float v_worldRadius;
 
 uniform sampler2D u_iconAtlas;
 
