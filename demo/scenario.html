@@ -63,21 +63,17 @@
         opacity: 0.35;
         cursor: default;
       }
-      #canvas-container {
-        position: relative;
-        flex: 1;
-        min-height: 0;
-      }
-      canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-      }
       .graph-label {
         color: rgba(255, 255, 255, 0.85);
         font: 11px/1 system-ui, sans-serif;
         text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
         padding: 2px 4px;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
       }
       #event-info {
         position: fixed;
@@ -90,46 +86,10 @@
         border-radius: 4px;
         pointer-events: none;
       }
-      #fps-panel {
-        position: fixed;
-        top: 56px;
-        right: 8px;
-        padding: 6px 8px;
-        background: rgba(0, 0, 0, 0.6);
-        border-radius: 4px;
-        pointer-events: none;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      #fps-text {
-        color: rgba(255, 255, 255, 0.7);
-        font: 12px/1 monospace;
-      }
-      #fps-graph {
-        display: block;
-        border-radius: 2px;
-        background: rgba(0, 0, 0, 0.3);
-      }
     </style>
   </head>
   <body>
-    <header>
-      <div class="toggle-group" id="dataset-toggle">
-        <button data-dataset="small" aria-pressed="true">Small</button>
-        <button data-dataset="medium" aria-pressed="false">Medium</button>
-        <button data-dataset="large" aria-pressed="false">Large</button>
-      </div>
-      <button id="fit-btn">Fit</button>
-    </header>
-    <div id="canvas-container">
-      <canvas id="canvas"></canvas>
-    </div>
-    <div id="event-info"></div>
-    <div id="fps-panel">
-      <span id="fps-text">-- FPS</span>
-      <canvas id="fps-graph" width="120" height="40"></canvas>
-    </div>
-    <script type="module" src="./main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="./scenario.tsx"></script>
   </body>
 </html>

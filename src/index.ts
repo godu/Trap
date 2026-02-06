@@ -18,3 +18,5 @@ export type {
   CameraState,
 } from "./types";
 export type { Bounds, CameraView } from "./camera";
+export { Graph } from "./react";
+export type { GraphProps, GraphRef } from "./react";
