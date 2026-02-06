@@ -155,11 +155,8 @@ void main() {
 
   // Bezier speed at endpoints for world-to-parameter conversion
   float halfLen = fullLen * 0.5;
-  float armLen = sqrt(halfLen * halfLen + curveDist * curveDist);
-  float speed0 = 2.0 * armLen;
-
-  // Parametric insets using per-node radii
-  float invSpeed0 = 1.0 / speed0;
+  // invSpeed0 = 1/(2*armLen); use inversesqrt to avoid sqrt + division
+  float invSpeed0 = 0.5 * inversesqrt(halfLen * halfLen + curveDist * curveDist);
   float tStart = srcRadius * invSpeed0;
   float tEnd = 1.0 - tgtRadius * invSpeed0;
   float tRange = tEnd - tStart;
@@ -199,8 +196,7 @@ void main() {
 
   // Tangent: B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
   vec2 tangent = 2.0 * omt * (ctrl - a_source) + 2.0 * t * (a_target - ctrl);
-  float tanLen = length(tangent);
-  vec2 tanDir = tangent * (1.0 / max(tanLen, 0.0001));
+  vec2 tanDir = tangent * inversesqrt(max(dot(tangent, tangent), 0.00000001));
   vec2 perpDir = vec2(-tanDir.y, tanDir.x);
 
   vec2 pos = curvePos + perpDir * perpOffset;
