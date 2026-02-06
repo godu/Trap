@@ -1235,7 +1235,8 @@ export class Renderer {
     const pool = this.interpNodePool;
     const omt = 1 - t;
     let poolIdx = 0;
-    for (const node of targetNodes) {
+    for (let ni = 0; ni < targetNodes.length; ni++) {
+      const node = targetNodes[ni];
       // Grow pool on demand, reuse existing objects
       let obj: { x: number; y: number; radius: number };
       if (poolIdx < pool.length) {
