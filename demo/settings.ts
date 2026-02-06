@@ -7,13 +7,29 @@ export const TYPE_COLORS: Record<string, [number, number, number]> = {
   // Compute — #4a90e2
   "aws:cloudformation:stack": [0.29, 0.56, 0.89],
   "aws:ec2:instance": [0.29, 0.56, 0.89],
+  "aws:ecs:service": [0.29, 0.56, 0.89],
   "aws:ecs:task-definition": [0.29, 0.56, 0.89],
   "aws:lambda:function": [0.29, 0.56, 0.89],
+  "aws:ssm:parameter": [0.29, 0.56, 0.89],
   // Database (data) — #2d9c4f
   "aws:dynamodb:table": [0.18, 0.61, 0.31],
+  "aws:elasticache:cachecluster": [0.18, 0.61, 0.31],
+  "aws:es:domain": [0.18, 0.61, 0.31],
+  "aws:kinesis:stream": [0.18, 0.61, 0.31],
   "aws:kms:key": [0.18, 0.61, 0.31],
+  "aws:rds:cluster": [0.18, 0.61, 0.31],
   "aws:s3:bucket": [0.18, 0.61, 0.31],
+  "aws:secretsmanager:secret": [0.18, 0.61, 0.31],
+  "aws:sns:topic": [0.18, 0.61, 0.31],
   "aws:sqs:queue": [0.18, 0.61, 0.31],
+  // External — white
+  "external:github:access-token": [1.0, 1.0, 1.0],
+  "external:mailchimp:api-key": [1.0, 1.0, 1.0],
+  "external:paniam:account": [1.0, 1.0, 1.0],
+  "external:slack:bot-token": [1.0, 1.0, 1.0],
+  "external:stripe:api-key": [1.0, 1.0, 1.0],
+  "external:telegram:bot-token": [1.0, 1.0, 1.0],
+  "external:twilio:api-key": [1.0, 1.0, 1.0],
 };
 
 export const DEFAULT_NODE_COLOR: [number, number, number] = [0.6, 0.6, 0.6];
