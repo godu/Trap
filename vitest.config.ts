@@ -20,6 +20,9 @@ export default defineConfig({
         },
       },
       {
+        optimizeDeps: {
+          include: ["react", "react-dom/client"],
+        },
         test: {
           name: "browser",
           globals: true,
