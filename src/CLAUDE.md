@@ -16,7 +16,9 @@ Exported from `index.ts`:
 ## Architecture
 
 - Instanced rendering: one draw call for all nodes, one for all edges.
-- Node instance data: 6 floats (x, y, r, g, b, radius) = 24 bytes per node.
+- Node: `{ id, x, y, r, g, b, a, s, z, i, l }` — all required. `s`=radius, `i`=icon index (0=none), `l`=label (""=none).
+- Edge: `{ id, src, tgt, r, g, b, a, s, z }` — all required. `s`=width.
+- Node instance data: 5 floats (x, y, premultiplied rgba, radius, icon) = 20 bytes per node.
 - Edge instance data: 20 bytes per edge (4x float32 positions + uint32 packed premultiplied RGBA).
 - Orthographic camera with smooth animated transitions.
 

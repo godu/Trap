@@ -28,8 +28,8 @@ describe("Interactions", () => {
       // Two spread-out small nodes — viewport is ~116 world units wide,
       // each node ~10px on screen, so a 200px drag clearly shifts them.
       const nodes = [
-        { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 3 },
-        { id: "b", x: 100, y: 0, r: 0, g: 1, b: 0, radius: 3 },
+        { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 3, z: 0, i: 0, l: "" },
+        { id: "b", x: 100, y: 0, r: 0, g: 1, b: 0, a: 1, s: 3, z: 0, i: 0, l: "" },
       ];
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);

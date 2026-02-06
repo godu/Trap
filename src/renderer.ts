@@ -70,8 +70,8 @@ function easeOutCubic(t: number): number {
 }
 
 /** Pre-allocated comparator for zIndex sorting (avoids closure per sort call) */
-function compareZIndex(a: { zIndex?: number }, b: { zIndex?: number }): number {
-  return (a.zIndex ?? 0) - (b.zIndex ?? 0);
+function compareZIndex(a: { z: number }, b: { z: number }): number {
+  return a.z - b.z;
 }
 
 /** Pack premultiplied RGBA into a uint32 (little-endian: R | G<<8 | B<<16 | A<<24) */
@@ -455,8 +455,8 @@ export class Renderer {
   private edgeGpuBytes = 0;
 
   // Reusable Map + object pool for interpolateEdges
-  private interpNodeMap = new Map<string, { x: number; y: number; radius: number }>();
-  private interpNodePool: { x: number; y: number; radius: number }[] = [];
+  private interpNodeMap = new Map<string, { x: number; y: number; s: number }>();
+  private interpNodePool: { x: number; y: number; s: number }[] = [];
   private displayNodes: Node[] = [];
   // Pre-allocated camera state (avoids allocation per frame)
   private cameraState: CameraState = {
@@ -849,13 +849,12 @@ export class Renderer {
       const bi = i * 20; // byte index
       f32[fi] = node.x;
       f32[fi + 1] = node.y;
-      const opacity = node.opacity ?? 1.0;
       u8[bi + 8] = (node.r * 255 + 0.5) | 0;
       u8[bi + 9] = (node.g * 255 + 0.5) | 0;
       u8[bi + 10] = (node.b * 255 + 0.5) | 0;
-      u8[bi + 11] = (opacity * 255 + 0.5) | 0;
-      f32[fi + 3] = node.radius;
-      f32[fi + 4] = node.icon ?? 0;
+      u8[bi + 11] = (node.a * 255 + 0.5) | 0;
+      f32[fi + 3] = node.s;
+      f32[fi + 4] = node.i;
     }
     const byteLen = sorted.length * 20;
     const view = this.nodeU8!.subarray(0, byteLen);
@@ -1097,8 +1096,8 @@ export class Renderer {
 
     for (let i = 0; i < sorted.length; i++) {
       const edge = sorted[i];
-      const src = this.nodeMap.get(edge.source);
-      const tgt = this.nodeMap.get(edge.target);
+      const src = this.nodeMap.get(edge.src);
+      const tgt = this.nodeMap.get(edge.tgt);
       if (!src || !tgt) continue;
 
       const slot = count * 8; // 32 bytes / 4 = 8 uint32-slots per edge
@@ -1106,10 +1105,10 @@ export class Renderer {
       f32[slot + 1] = src.y;
       f32[slot + 2] = tgt.x;
       f32[slot + 3] = tgt.y;
-      f32[slot + 4] = src.radius;
-      f32[slot + 5] = tgt.radius;
+      f32[slot + 4] = src.s;
+      f32[slot + 5] = tgt.s;
       u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a);
-      f32[slot + 7] = edge.width ?? 1.0;
+      f32[slot + 7] = edge.s;
 
       // Compute AABB for this edge, expanded for curve bulge and radii
       // Use Manhattan distance * CURVATURE as conservative approximation (avoids sqrt)
@@ -1119,7 +1118,7 @@ export class Renderer {
       const absDx = dx < 0 ? -dx : dx;
       const absDy = dy < 0 ? -dy : dy;
       const curvePad = (absDx + absDy) * CURVATURE;
-      const pad = (src.radius > tgt.radius ? src.radius : tgt.radius) + curvePad;
+      const pad = (src.s > tgt.s ? src.s : tgt.s) + curvePad;
       const aabbSlot = count * 4;
       const eMinX = (src.x < tgt.x ? src.x : tgt.x) - pad;
       const eMinY = (src.y < tgt.y ? src.y : tgt.y) - pad;
@@ -1254,7 +1253,7 @@ export class Renderer {
         if (
           nodes[i].x !== oldNodes[i].x ||
           nodes[i].y !== oldNodes[i].y ||
-          nodes[i].radius !== oldNodes[i].radius ||
+          nodes[i].s !== oldNodes[i].s ||
           nodes[i].id !== oldNodes[i].id
         ) {
           posChanged = true;
@@ -1389,36 +1388,36 @@ export class Renderer {
       if (old) {
         ix = old.x * omt + node.x * t;
         iy = old.y * omt + node.y * t;
-        ir = old.radius * omt + node.radius * t;
+        ir = old.s * omt + node.s * t;
         f32[fi] = ix;
         f32[fi + 1] = iy;
-        const opacity = (old.opacity ?? 1.0) * omt + (node.opacity ?? 1.0) * t;
+        const a = old.a * omt + node.a * t;
         u8[bi + 8] = ((old.r * omt + node.r * t) * 255 + 0.5) | 0;
         u8[bi + 9] = ((old.g * omt + node.g * t) * 255 + 0.5) | 0;
         u8[bi + 10] = ((old.b * omt + node.b * t) * 255 + 0.5) | 0;
-        u8[bi + 11] = (opacity * 255 + 0.5) | 0;
+        u8[bi + 11] = (a * 255 + 0.5) | 0;
         f32[fi + 3] = ir;
       } else {
         // New node — fade in
         ix = node.x;
         iy = node.y;
-        ir = node.radius;
+        ir = node.s;
         f32[fi] = ix;
         f32[fi + 1] = iy;
-        const opacity = (node.opacity ?? 1.0) * t;
+        const a = node.a * t;
         u8[bi + 8] = (node.r * 255 + 0.5) | 0;
         u8[bi + 9] = (node.g * 255 + 0.5) | 0;
         u8[bi + 10] = (node.b * 255 + 0.5) | 0;
-        u8[bi + 11] = (opacity * 255 + 0.5) | 0;
+        u8[bi + 11] = (a * 255 + 0.5) | 0;
         f32[fi + 3] = ir;
       }
-      f32[fi + 4] = node.icon ?? 0;
+      f32[fi + 4] = node.i;
       // Build display node with interpolated position for label overlay
       const d = display[i];
       if (d && d.id === node.id) {
         d.x = ix;
         d.y = iy;
-        d.radius = ir;
+        d.s = ir;
       } else {
         display[i] = {
           id: node.id,
@@ -1427,11 +1426,11 @@ export class Renderer {
           r: node.r,
           g: node.g,
           b: node.b,
-          radius: ir,
-          opacity: node.opacity,
-          zIndex: node.zIndex,
-          icon: node.icon,
-          label: node.label,
+          a: node.a,
+          s: ir,
+          z: node.z,
+          i: node.i,
+          l: node.l,
         };
       }
     }
@@ -1463,11 +1462,11 @@ export class Renderer {
     for (let ni = 0; ni < targetNodes.length; ni++) {
       const node = targetNodes[ni];
       // Grow pool on demand, reuse existing objects
-      let obj: { x: number; y: number; radius: number };
+      let obj: { x: number; y: number; s: number };
       if (poolIdx < pool.length) {
         obj = pool[poolIdx];
       } else {
-        obj = { x: 0, y: 0, radius: 0 };
+        obj = { x: 0, y: 0, s: 0 };
         pool.push(obj);
       }
       poolIdx++;
@@ -1475,11 +1474,11 @@ export class Renderer {
       if (old) {
         obj.x = old.x * omt + node.x * t;
         obj.y = old.y * omt + node.y * t;
-        obj.radius = old.radius * omt + node.radius * t;
+        obj.s = old.s * omt + node.s * t;
       } else {
         obj.x = node.x;
         obj.y = node.y;
-        obj.radius = node.radius;
+        obj.s = node.s;
       }
       interpNodeMap.set(node.id, obj);
     }
@@ -1503,8 +1502,8 @@ export class Renderer {
       const edge = target[i];
       const old = this.oldEdgeMap.get(edge.id);
 
-      const src = interpNodeMap.get(edge.source);
-      const tgt = interpNodeMap.get(edge.target);
+      const src = interpNodeMap.get(edge.src);
+      const tgt = interpNodeMap.get(edge.tgt);
       if (!src || !tgt) continue;
 
       const slot = count * 8;
@@ -1512,21 +1511,21 @@ export class Renderer {
       f32[slot + 1] = src.y;
       f32[slot + 2] = tgt.x;
       f32[slot + 3] = tgt.y;
-      f32[slot + 4] = src.radius;
-      f32[slot + 5] = tgt.radius;
+      f32[slot + 4] = src.s;
+      f32[slot + 5] = tgt.s;
 
       if (old) {
-        // Common edge — interpolate color/width
+        // Common edge — interpolate color/size
         const a = old.a * omt + edge.a * t;
         const r = old.r * omt + edge.r * t;
         const g = old.g * omt + edge.g * t;
         const b = old.b * omt + edge.b * t;
-        f32[slot + 7] = (old.width ?? 1.0) * omt + (edge.width ?? 1.0) * t;
+        f32[slot + 7] = old.s * omt + edge.s * t;
         u32[slot + 6] = packPremultiplied(r, g, b, a);
       } else {
         // New edge — fade in from transparent
         u32[slot + 6] = packPremultiplied(edge.r, edge.g, edge.b, edge.a * t);
-        f32[slot + 7] = edge.width ?? 1.0;
+        f32[slot + 7] = edge.s;
       }
 
       // Compute AABB for this edge (positions are interpolated)
@@ -1536,7 +1535,7 @@ export class Renderer {
       const absDx = dx < 0 ? -dx : dx;
       const absDy = dy < 0 ? -dy : dy;
       const curvePad = (absDx + absDy) * CURVATURE;
-      const pad = (src.radius > tgt.radius ? src.radius : tgt.radius) + curvePad;
+      const pad = (src.s > tgt.s ? src.s : tgt.s) + curvePad;
       const aabbSlot = count * 4;
       const eMinX = (src.x < tgt.x ? src.x : tgt.x) - pad;
       const eMinY = (src.y < tgt.y ? src.y : tgt.y) - pad;
@@ -1592,7 +1591,7 @@ export class Renderer {
         const dx = worldX - node.x;
         const dy = worldY - node.y;
         const distSq = dx * dx + dy * dy;
-        let r = node.radius;
+        let r = node.s;
         if (r < minR) r = minR;
         else if (r > maxR) r = maxR;
         if (distSq < r * r && distSq < closestDist) {
@@ -1644,7 +1643,7 @@ export class Renderer {
           const dx = worldX - node.x;
           const dy = worldY - node.y;
           const distSq = dx * dx + dy * dy;
-          let r = node.radius;
+          let r = node.s;
           if (r < minR) r = minR;
           else if (r > maxR) r = maxR;
           if (distSq < r * r && distSq < closestDist) {
@@ -1762,11 +1761,11 @@ export class Renderer {
 
     for (let i = 0; i < this.edgeObjects.length; i++) {
       const edge = this.edgeObjects[i];
-      const src = this.nodeMap.get(edge.source);
-      const tgt = this.nodeMap.get(edge.target);
+      const src = this.nodeMap.get(edge.src);
+      const tgt = this.nodeMap.get(edge.tgt);
       if (!src || !tgt) continue;
 
-      const halfW = (edge.width ?? 1.0) * 0.5;
+      const halfW = edge.s * 0.5;
       const edgeTol = baseTol + halfW;
 
       const dx = tgt.x - src.x;

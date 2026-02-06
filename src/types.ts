@@ -5,25 +5,25 @@ export interface Node {
   r: number;
   g: number;
   b: number;
-  radius: number;
-  opacity?: number;
-  zIndex?: number;
-  /** Icon index (1-based) into the icon atlas. 0 or undefined = no icon. */
-  icon?: number;
-  /** Text label displayed near the node. */
-  label?: string;
+  a: number;
+  s: number;
+  z: number;
+  /** Icon index (1-based) into the icon atlas. 0 = no icon. */
+  i: number;
+  /** Text label displayed near the node. "" = no label. */
+  l: string;
 }
 
 export interface Edge {
   id: string;
-  source: string;
-  target: string;
+  src: string;
+  tgt: string;
   r: number;
   g: number;
   b: number;
   a: number;
-  width?: number;
-  zIndex?: number;
+  s: number;
+  z: number;
 }
 
 export interface NodeEvent {

@@ -75,10 +75,10 @@ describe("Events", () => {
   describe("edge click", () => {
     it("onEdgeClick fires with correct edgeId", () => {
       canvas = createTestCanvas();
-      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
+      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
-      const edges = [{ id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 4 }];
+      const edges = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 4, z: 0 }];
       const onEdgeClick = vi.fn();
       renderer = createTestRenderer(canvas, nodes, { edges, onEdgeClick });
       renderer.fitToNodes(0);
@@ -179,10 +179,10 @@ describe("Events", () => {
 
     it("onEdgeHoverEnter and Leave fire correctly", () => {
       canvas = createTestCanvas();
-      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
+      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
-      const edges = [{ id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 4 }];
+      const edges = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 4, z: 0 }];
       const onEdgeHoverEnter = vi.fn();
       const onEdgeHoverLeave = vi.fn();
       renderer = createTestRenderer(canvas, nodes, {

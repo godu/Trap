@@ -104,8 +104,20 @@ describe("Rendering", () => {
 
     it("reflects opacity in rendered output", () => {
       canvas = createTestCanvas();
-      const fullNode = { id: "full", x: -20, y: 0, r: 1, g: 0, b: 0, radius: 8 };
-      const dimNode = { id: "dim", x: 20, y: 0, r: 1, g: 0, b: 0, radius: 8, opacity: 0.3 };
+      const fullNode = {
+        id: "full",
+        x: -20,
+        y: 0,
+        r: 1,
+        g: 0,
+        b: 0,
+        a: 1,
+        s: 8,
+        z: 0,
+        i: 0,
+        l: "",
+      };
+      const dimNode = { id: "dim", x: 20, y: 0, r: 1, g: 0, b: 0, a: 0.3, s: 8, z: 0, i: 0, l: "" };
       const nodes = [fullNode, dimNode];
       renderer = createTestRenderer(canvas, nodes);
       renderer.fitToNodes(0);
@@ -127,10 +139,10 @@ describe("Rendering", () => {
   describe("edges", () => {
     it("renders edges between connected nodes", () => {
       canvas = createTestCanvas();
-      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
+      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB];
-      const edges = [{ id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 3 }];
+      const edges = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 3, z: 0 }];
       renderer = createTestRenderer(canvas, nodes, { edges });
       renderer.setCurvature(0);
       renderer.fitToNodes(0);
@@ -147,12 +159,12 @@ describe("Rendering", () => {
 
     it("does not render edges where none exist", () => {
       canvas = createTestCanvas();
-      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, radius: 5 };
-      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, radius: 5 };
+      const nodeA = { id: "a", x: -30, y: 0, r: 1, g: 0, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
+      const nodeB = { id: "b", x: 30, y: 0, r: 0, g: 1, b: 0, a: 1, s: 5, z: 0, i: 0, l: "" };
       // Far-apart node with no edge to a/b
-      const nodeC = { id: "c", x: 0, y: -40, r: 0, g: 0, b: 1, radius: 5 };
+      const nodeC = { id: "c", x: 0, y: -40, r: 0, g: 0, b: 1, a: 1, s: 5, z: 0, i: 0, l: "" };
       const nodes = [nodeA, nodeB, nodeC];
-      const edges = [{ id: "ab", source: "a", target: "b", r: 1, g: 1, b: 1, a: 1, width: 2 }];
+      const edges = [{ id: "ab", src: "a", tgt: "b", r: 1, g: 1, b: 1, a: 1, s: 2, z: 0 }];
       renderer = createTestRenderer(canvas, nodes, { edges });
       renderer.setCurvature(0);
       renderer.fitToNodes(0);
@@ -172,7 +184,7 @@ describe("Rendering", () => {
     it("clamps large world radius to maxScreenRadius", () => {
       canvas = createTestCanvas();
       // Single node with a huge world radius
-      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 500 }];
+      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 500, z: 0, i: 0, l: "" }];
       // maxScreenRadius = 20px → node should not fill the whole canvas
       renderer = createTestRenderer(canvas, nodes, { maxScreenRadius: 20 });
       renderer.fitToNodes(0);
@@ -186,8 +198,8 @@ describe("Rendering", () => {
       canvas = createTestCanvas();
       // Two widely-spaced tiny nodes — fitToNodes will zoom way out
       const nodes = [
-        { id: "a", x: -1000, y: 0, r: 1, g: 0, b: 0, radius: 0.1 },
-        { id: "b", x: 1000, y: 0, r: 0, g: 1, b: 0, radius: 0.1 },
+        { id: "a", x: -1000, y: 0, r: 1, g: 0, b: 0, a: 1, s: 0.1, z: 0, i: 0, l: "" },
+        { id: "b", x: 1000, y: 0, r: 0, g: 1, b: 0, a: 1, s: 0.1, z: 0, i: 0, l: "" },
       ];
       // minScreenRadius = 4px → nodes should still be visible at center
       renderer = createTestRenderer(canvas, nodes, { minScreenRadius: 4 });
@@ -204,7 +216,7 @@ describe("Rendering", () => {
     it("hit test respects clamped radius", () => {
       canvas = createTestCanvas();
       // Single node with huge world radius, but clamped to 20px max
-      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, radius: 500 }];
+      const nodes = [{ id: "big", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 500, z: 0, i: 0, l: "" }];
       let clickedNode: string | null = null;
       renderer = createTestRenderer(canvas, nodes, {
         maxScreenRadius: 20,

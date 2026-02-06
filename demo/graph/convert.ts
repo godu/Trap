@@ -6,8 +6,8 @@ import {
   DEFAULT_NODE_COLOR,
   EDGE_TYPE_COLORS,
   DEFAULT_EDGE_COLOR,
-  NODE_RADIUS,
-  SELECTED_NODE_RADIUS,
+  NODE_SIZE,
+  SELECTED_NODE_SIZE,
 } from "../settings";
 
 /** Convert a GraphStep's nodes to renderer Node[] with ids. */
@@ -22,10 +22,11 @@ export function toRenderNodes(step: GraphStep): Node[] {
       r,
       g,
       b,
-      radius: gNode.selected ? SELECTED_NODE_RADIUS : NODE_RADIUS,
-      opacity: 1.0,
-      icon: TYPE_ICON_INDEX[gNode.type] ?? 0,
-      label: gNode.label,
+      a: 1.0,
+      s: gNode.selected ? SELECTED_NODE_SIZE : NODE_SIZE,
+      z: 0,
+      i: TYPE_ICON_INDEX[gNode.type] ?? 0,
+      l: gNode.label,
     });
   }
   return nodes;
@@ -42,13 +43,14 @@ export function toEdges(step: GraphStep): Edge[] {
       const [r, g, b, a] = EDGE_TYPE_COLORS[edge.type] ?? DEFAULT_EDGE_COLOR;
       edges.push({
         id: `${srcId}->${tgtId}`,
-        source: srcId,
-        target: tgtId,
+        src: srcId,
+        tgt: tgtId,
         r,
         g,
         b,
         a,
-        zIndex: edge.type === "escalation" ? 1 : 0,
+        s: 1,
+        z: edge.type === "escalation" ? 1 : 0,
       });
     }
   }
