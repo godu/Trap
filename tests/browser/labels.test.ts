@@ -1,9 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  createTestCanvas,
-  createTestRenderer,
-  nextFrame,
-} from "./helpers";
+import { createTestCanvas, createTestRenderer, nextFrame } from "./helpers";
 import { LabelOverlay } from "../../src/index";
 import type { Renderer } from "../../src/index";
 import type { Node } from "../../src/index";
@@ -14,10 +10,7 @@ describe("Label overlay", () => {
   let container: HTMLDivElement;
   let labels: LabelOverlay;
 
-  function setup(
-    nodes: Node[],
-    labelOpts?: { minScreenRadius?: number; maxLabels?: number },
-  ) {
+  function setup(nodes: Node[], labelOpts?: { minScreenRadius?: number; maxLabels?: number }) {
     canvas = createTestCanvas();
     // Wrap canvas in a positioned container for the overlay
     container = document.createElement("div");
@@ -130,9 +123,7 @@ describe("Label overlay", () => {
   });
 
   it("cache invalidates on viewport resize", async () => {
-    setup([
-      { id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 20, z: 0, i: 0, l: "Test" },
-    ]);
+    setup([{ id: "a", x: 0, y: 0, r: 1, g: 0, b: 0, a: 1, s: 20, z: 0, i: 0, l: "Test" }]);
 
     const visible1 = visibleLabels();
     expect(visible1.length).toBeGreaterThan(0);
