@@ -9,7 +9,13 @@ function makeStep(
   const nodeMap = new Map(
     nodes.map(([id, type, x, y, selected]) => [
       id,
-      { label: id, type, x, y, ...(selected !== undefined ? { selected } : {}) },
+      {
+        label: id,
+        type,
+        x,
+        y,
+        ...(selected !== undefined ? { selected } : {}),
+      },
     ]),
   );
   const edgeMap = new Map<string, Map<string, { type: string }>>();
@@ -103,9 +109,9 @@ describe("toRenderNodes", () => {
     ]);
     const nodes = toRenderNodes(step);
 
-    expect(nodes[0].s).toBe(5.0);
-    expect(nodes[1].s).toBe(4.0);
-    expect(nodes[2].s).toBe(4.0);
+    expect(nodes[0].s).toBe(3.0);
+    expect(nodes[1].s).toBe(2.0);
+    expect(nodes[2].s).toBe(2.0);
   });
 });
 

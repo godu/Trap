@@ -46,6 +46,6 @@ export const DEFAULT_EDGE_COLOR: [number, number, number, number] = [
   0.5, 0.5, 0.5, 0.3,
 ];
 
-export const NODE_SIZE = 4.0;
-export const SELECTED_NODE_SIZE = 5.0;
+export const NODE_SIZE = 2.0;
+export const SELECTED_NODE_SIZE = 3.0;
 export const DIM_A = 0.01;
