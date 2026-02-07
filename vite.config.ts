@@ -15,6 +15,7 @@ export default defineConfig({
         index: resolve(__dirname, "demo/index.html"),
         transition: resolve(__dirname, "demo/transition.html"),
         scenario: resolve(__dirname, "demo/scenario.html"),
+        "icon-demo": resolve(__dirname, "demo/icon-demo.html"),
       },
     },
   },

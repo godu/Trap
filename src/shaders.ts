@@ -72,7 +72,9 @@ void main() {
   if (v_hasIcon > 0.5) {
     vec2 iconUV = v_uv * 0.5 + 0.5;
     vec2 atlasUV = v_atlasOrigin + iconUV * v_atlasScale;
-    rgb += texture(u_iconAtlas, atlasUV).a * a;
+    vec4 icon = texture(u_iconAtlas, atlasUV);
+    // Composite icon over node color (premultiplied output)
+    rgb = mix(rgb, icon.rgb * icon.a * a, icon.a);
   }
 
   outColor = vec4(rgb, a);
