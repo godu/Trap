@@ -467,8 +467,8 @@ export class Renderer {
     halfH: 1,
     clientWidth: 0,
     clientHeight: 0,
-    minScreenRadius: 2,
-    maxScreenRadius: 40,
+    minScreenRadius: 0,
+    maxScreenRadius: 1e10,
   };
 
   // Reusable sort scratch arrays (avoid .slice() allocation per upload)
@@ -558,8 +558,8 @@ export class Renderer {
       this.dataAnimEasing = options.animationEasing;
     }
 
-    this.minScreenRadius = options.minScreenRadius ?? 2;
-    this.maxScreenRadius = options.maxScreenRadius ?? 40;
+    this.minScreenRadius = options.minScreenRadius ?? 0;
+    this.maxScreenRadius = options.maxScreenRadius ?? 1e10;
 
     const gl = this.canvas.getContext("webgl2", {
       antialias: false,

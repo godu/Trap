@@ -71,9 +71,9 @@ export interface RendererOptions {
   onBackgroundDblClick?: (event: BackgroundEvent) => void;
   /** Called after each render. */
   onRender?: () => void;
-  /** Minimum node screen radius in CSS pixels (default: 2). */
+  /** Minimum node screen radius in CSS pixels. No clamping if omitted. */
   minScreenRadius?: number;
-  /** Maximum node screen radius in CSS pixels (default: 40). */
+  /** Maximum node screen radius in CSS pixels. No clamping if omitted. */
   maxScreenRadius?: number;
 }
 
