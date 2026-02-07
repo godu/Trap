@@ -15,11 +15,15 @@ export async function buildIconAtlas(
     return { canvas, columns: 1, rows: 1 };
   }
 
-  const columns = Math.ceil(Math.sqrt(count));
-  const rows = Math.ceil(count / columns);
+  const minCols = Math.ceil(Math.sqrt(count));
+  const minRows = Math.ceil(count / minCols);
 
-  const width = nextPow2(columns * cellSize);
-  const height = nextPow2(rows * cellSize);
+  const width = nextPow2(minCols * cellSize);
+  const height = nextPow2(minRows * cellSize);
+
+  // Use padded grid dimensions so layout matches UV space exactly
+  const columns = width / cellSize;
+  const rows = height / cellSize;
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -34,11 +38,7 @@ export async function buildIconAtlas(
     ctx.drawImage(images[i], col * cellSize, row * cellSize, cellSize, cellSize);
   }
 
-  return {
-    canvas,
-    columns: width / cellSize,
-    rows: height / cellSize,
-  };
+  return { canvas, columns, rows };
 }
 
 function loadSvgImage(svgString: string): Promise<HTMLImageElement> {

@@ -17,11 +17,6 @@ import federationSvg from "./federation.svg?raw";
 import networkSvg from "./network.svg?raw";
 import shieldSvg from "./shield.svg?raw";
 
-/** Remove the background circle (cx=24 cy=24 r=22) from icon SVGs. */
-function stripIconBackground(svg: string): string {
-  return svg.replace(/<circle\s+cx="24"\s+cy="24"\s+r="22"\s+fill="[^"]*"\s*\/>/, "");
-}
-
 // Order matters: array index + 1 = icon index in Node.icon
 const RAW_ICONS = [
   principalSvg, // 1
@@ -44,8 +39,8 @@ const RAW_ICONS = [
   shieldSvg, // 18
 ];
 
-/** SVG strings with background circle removed, ready for atlas. */
-export const ICON_SVGS = RAW_ICONS.map(stripIconBackground);
+/** SVG strings ready for atlas. */
+export const ICON_SVGS = RAW_ICONS;
 
 /** Map AWS resource type to 1-based icon index. */
 export const TYPE_ICON_INDEX: Record<string, number> = {
